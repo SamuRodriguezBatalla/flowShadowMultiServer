@@ -17,7 +17,6 @@ module.exports = {
         if (!config) return interaction.editReply('❌ Falta /setup.');
 
         try {
-            console.log(`\n=== 🚀 NEW SEASON ===`);
             const oldSeason = config.season || 0;
             const currentTribes = loadTribes(guild.id);
             
@@ -25,66 +24,53 @@ module.exports = {
             archiveSeason(guild.id, oldSeason, currentTribes);
             saveTribes(guild.id, {}); 
             config.season = oldSeason + 1;
-            saveGuildConfig(guild.id, config);
-
-            await interaction.editReply(`🔥 **Limpiando mapa para Season ${config.season}...**`);
             
-            // 2. BORRAR ROLES
+            await interaction.editReply(`🔥 **Cambiando a Season ${config.season}...**`);
+
+            // 2. DEMOLICIÓN DE CATEGORÍAS (Privada y Tribus)
+            const catsToDelete = [config.categories.private_registration, config.categories.tribes];
+            for (const catId of catsToDelete) {
+                if (catId) {
+                    const cat = guild.channels.cache.get(catId);
+                    if (cat) await cat.delete('New Season').catch(()=>{});
+                }
+            }
+
+            // 3. RECREAR CATEGORÍA PRIVADA (Posición 0)
+            const newPrivateCat = await guild.channels.create({
+                name: '🔐 Rᴇɢɪsᴛʀᴏ-Pʀɪᴠᴀᴅᴏ',
+                type: ChannelType.GuildCategory,
+                position: 0,
+                permissionOverwrites: [{ id: guild.id, deny: [PermissionFlagsBits.ViewChannel] }]
+            });
+            config.categories.private_registration = newPrivateCat.id;
+            saveGuildConfig(guild.id, config); // Guardar cambios
+
+            // 4. BORRAR ROLES
             const safeIDs = [config.roles.unverified, config.roles.survivor, config.roles.leader, guild.id, ...(config.roles.protected || [])];
             const roles = await guild.roles.fetch();
             for (const r of roles.values()) {
-                if (!safeIDs.includes(r.id) && !r.managed && !r.permissions.has(PermissionFlagsBits.Administrator)) {
-                    await r.delete('New Season Wipe').catch(() => {});
+                if (!safeIDs.includes(r.id) && !r.managed && !r.permissions.has('Administrator')) {
+                    await r.delete().catch(()=>{});
                 }
             }
 
-            // ============================================================
-            // 3. BORRADO DE CANALES (UNIVERSAL)
-            // ============================================================
-            const allChannels = await guild.channels.fetch();
-            const systemChannelIds = Object.values(config.channels);
-
-            for (const channel of allChannels.values()) {
-                if (channel.type !== ChannelType.GuildText) continue;
-                if (channel.id === interaction.channelId) continue;
-                if (systemChannelIds.includes(channel.id)) continue;
-
-                let shouldDelete = false;
-                const name = channel.name.toLowerCase();
-
-                // A. Nombre contiene registro-
-                if (name.includes('registro-')) shouldDelete = true;
-
-                // B. Topic contiene SYSTEM:REGISTRO
-                if (channel.topic && channel.topic.includes('SYSTEM:REGISTRO')) shouldDelete = true;
-
-                // C. Categoría de Tribus
-                if (config.categories.tribes && channel.parentId === config.categories.tribes) {
-                    if (channel.id !== config.channels.leader_channel) shouldDelete = true;
-                }
-
-                if (shouldDelete) {
-                    console.log(`🗑️ Eliminando: ${channel.name}`);
-                    await channel.delete('New Season').catch(()=>{});
-                }
-            }
-            // ============================================================
-
-            // 4. RESET MIEMBROS
-            const ur = guild.roles.cache.get(config.roles.unverified);
+            // 5. RESET MIEMBROS
+            const unverifiedRole = guild.roles.cache.get(config.roles.unverified);
             const members = await guild.members.fetch().catch(() => guild.members.cache);
 
-            if (ur) {
+            if (unverifiedRole) {
                 for (const m of members.values()) {
-                    if (!m.user.bot && !m.permissions.has('Administrator')) await m.roles.set([ur]).catch(()=>{});
+                    if (!m.user.bot && !m.permissions.has('Administrator')) {
+                        await m.roles.set([unverifiedRole]).catch(()=>{});
+                    }
                 }
             }
 
             await updateLog(guild, interaction.client);
             
-            await interaction.editReply(`✅ **Season ${oldSeason} archivada.**\n✅ **Season ${config.season} iniciada.**`);
+            await interaction.editReply(`✅ **Season ${config.season} iniciada.**\nCategoría de registros limpia y renovada.`);
             
-            // Mensaje público de Season Nueva
             const welcomeChan = guild.channels.cache.get(config.channels.welcome);
             if (welcomeChan) {
                 welcomeChan.send({ embeds: [new EmbedBuilder()
@@ -94,7 +80,7 @@ module.exports = {
                 ]}).catch(()=>{});
             }
 
-            // 5. CREAR NUEVOS CANALES
+            // 6. CREAR CANALES
             sincronizarRegistros(guild, config);
 
         } catch (e) {

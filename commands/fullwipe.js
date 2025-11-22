@@ -14,92 +14,86 @@ module.exports = {
 
         const row = new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId('cancel').setLabel('Cancelar').setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId('confirm').setLabel('SÍ, REINICIAR A SEASON 0').setStyle(ButtonStyle.Danger)
+            new ButtonBuilder().setCustomId('confirm').setLabel('SÍ, REINICIAR A 0').setStyle(ButtonStyle.Danger)
         );
 
         await interaction.editReply({ 
-            embeds: [new EmbedBuilder().setTitle('☢️ FULL WIPE DETECTED').setDescription('⚠️ **PELIGRO**\nSe borrarán todas las tribus y canales de registro.\n**La Season volverá a 0.**').setColor('DarkRed')],
+            embeds: [new EmbedBuilder().setTitle('☢️ FULL WIPE').setDescription('⚠️ Se eliminará la categoría de registros completa.\n⚠️ Se resetearán todos los usuarios.\n⚠️ Season 0.').setColor('DarkRed')],
             components: [row] 
         });
 
         const collector = interaction.channel.createMessageComponentCollector({ 
-            filter: i => i.user.id === interaction.user.id && i.message.interaction.id === interaction.id,
-            time: 30000, max: 1
+            filter: i => i.user.id === interaction.user.id, 
+            time: 30000, max: 1 
         });
 
         collector.on('collect', async i => {
             if (i.customId === 'cancel') return i.update({ content: 'Cancelado.', embeds: [], components: [] });
             
-            await i.update({ content: '☢️ **Ejecutando Barrido Universal...**', embeds: [], components: [] });
+            await i.update({ content: '☢️ **Ejecutando Demolición...**', embeds: [], components: [] });
 
             try {
                 const guild = interaction.guild;
-                console.log(`\n=== ☢️ FULLWIPE SEASON 0 ===`);
                 
-                // 1. RESETEO DE DATOS
+                // 1. RESET DB
                 resetServerData(guild.id); 
                 let config = loadGuildConfig(guild.id) || { roles: {}, channels: {}, categories: {} };
-                config.season = 0; // FORCE 0
-                saveGuildConfig(guild.id, config);
+                config.season = 0;
 
-                // 2. BORRAR ROLES (Menos protegidos)
-                const safeIDs = [config.roles.unverified, config.roles.survivor, config.roles.leader, guild.id, ...(config.roles.protected || [])];
-                const roles = await guild.roles.fetch();
-                for (const r of roles.values()) {
-                    if (!safeIDs.includes(r.id) && !r.managed && !r.permissions.has('Administrator')) await r.delete().catch(()=>{});
-                }
-
-                // ============================================================
-                // 3. BORRADO DE CANALES (UNIVERSAL POR NOMBRE Y TOPIC)
-                // ============================================================
-                const allChannels = await guild.channels.fetch();
-                const systemChannelIds = Object.values(config.channels || {});
-
-                for (const channel of allChannels.values()) {
-                    if (channel.type !== ChannelType.GuildText) continue;
-                    if (channel.id === interaction.channelId) continue;
-                    if (systemChannelIds.includes(channel.id)) continue;
-
-                    let shouldDelete = false;
-                    const name = channel.name.toLowerCase();
-
-                    // A. Por Nombre (Registros viejos y nuevos)
-                    if (name.includes('registro-')) shouldDelete = true;
-
-                    // B. Por Topic (Etiqueta de sistema)
-                    if (channel.topic && channel.topic.includes('SYSTEM:REGISTRO')) shouldDelete = true;
-
-                    // C. Por Categoría de Tribus
-                    if (config.categories.tribes && channel.parentId === config.categories.tribes) {
-                        if (channel.id !== config.channels.leader_channel) shouldDelete = true;
-                    }
-
-                    if (shouldDelete) {
-                        console.log(`🗑️ Eliminando: ${channel.name}`);
-                        await channel.delete('Full Wipe').catch(e => console.log(`   ❌ Error: ${e.message}`));
-                    }
-                }
-                // ============================================================
-
-                await updateLog(guild, interaction.client);
-
-                // 4. RESET MIEMBROS (SIN TIMEOUT)
-                const ur = guild.roles.cache.get(config.roles.unverified);
-                // Fetch seguro
-                const members = await guild.members.fetch().catch(() => guild.members.cache);
+                // 2. BORRAR CATEGORÍAS ENTERAS (Más rápido y limpio)
+                const catsToDelete = [config.categories.private_registration, config.categories.tribes];
                 
-                if (ur) {
-                    for (const m of members.values()) {
-                        if (!m.user.bot && !m.permissions.has('Administrator')) {
-                            // Reset total: Setear solo Unverified borra los demás
-                            await m.roles.set([ur]).catch(()=>{});
+                for (const catId of catsToDelete) {
+                    if (catId) {
+                        const cat = guild.channels.cache.get(catId);
+                        if (cat) {
+                            console.log(`🗑️ Demoliendo categoría: ${cat.name}`);
+                            // Esto borra la categoría y TODOS sus canales hijos automáticamente
+                            await cat.delete('Full Wipe').catch(e => console.log(`Error borrando cat: ${e.message}`));
                         }
                     }
                 }
 
-                await interaction.editReply({ content: `✅ **Full Wipe Completado.**\n📉 Season actual: **0**.\n♻️ Regenerando registros...`, components: [] });
+                // 3. RECREAR CATEGORÍA PRIVADA (Posición 0)
+                console.log(`🏗️ Reconstruyendo infraestructura...`);
+                const newPrivateCat = await guild.channels.create({
+                    name: '🔐 Rᴇɢɪsᴛʀᴏ-Pʀɪᴠᴀᴅᴏ',
+                    type: ChannelType.GuildCategory,
+                    position: 0, // ARRIBA DEL TODO
+                    permissionOverwrites: [{ id: guild.id, deny: [PermissionFlagsBits.ViewChannel] }]
+                });
+                
+                // Guardar nuevo ID
+                config.categories.private_registration = newPrivateCat.id;
+                saveGuildConfig(guild.id, config);
 
-                // 5. CREAR CANALES NUEVOS
+                // 4. BORRAR ROLES ANTIGUOS
+                const safeIDs = [config.roles.unverified, config.roles.survivor, config.roles.leader, guild.id, ...(config.roles.protected || [])];
+                const roles = await guild.roles.fetch();
+                for (const r of roles.values()) {
+                    if (!safeIDs.includes(r.id) && !r.managed && !r.permissions.has('Administrator')) {
+                        await r.delete().catch(()=>{});
+                    }
+                }
+
+                await updateLog(guild, interaction.client);
+
+                // 5. RESETEO DE MIEMBROS (Quitar todo, dar Unverified)
+                const unverifiedRole = guild.roles.cache.get(config.roles.unverified);
+                const members = await guild.members.fetch().catch(() => guild.members.cache);
+                
+                if (unverifiedRole) {
+                    for (const m of members.values()) {
+                        if (!m.user.bot && !m.permissions.has('Administrator')) {
+                            // .set() reemplaza todos los roles por el que le pasas
+                            await m.roles.set([unverifiedRole]).catch(()=>{});
+                        }
+                    }
+                }
+
+                await interaction.editReply({ content: `✅ **Wipe Completado.**\nSeason 0 activa.\nInfraestructura reconstruida.`, components: [] });
+
+                // 6. EL POLICÍA CREARÁ LOS CANALES EN LA NUEVA CATEGORÍA
                 sincronizarRegistros(guild, config);
 
             } catch (e) {

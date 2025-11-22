@@ -28,45 +28,46 @@ async function iniciarRegistro(member) {
 
         if (member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
 
-        // 1. Asegurar Rol No Verificado
+        // 1. ASEGURAR ROL NO VERIFICADO
         if (!member.roles.cache.has(unverifiedRole.id)) {
             await member.roles.add(unverifiedRole).catch(()=>{});
         }
 
-        // 2. Limpieza de canales anteriores (Búsqueda híbrida)
+        // 2. BUSCAR Y BORRAR CANALES VIEJOS (Limpieza)
         const suffix = member.id.slice(-4);
         const oldCh = guild.channels.cache.find(c => {
             if (c.type !== ChannelType.GuildText) return false;
-            const isMyTopic = c.topic && c.topic.includes(`USER:${member.id}`);
-            const isMyName = c.name.includes(`-${suffix}`) && c.name.startsWith('registro-');
+            const isMyTopic = c.topic && c.topic.includes(member.id);
+            const isMyName = c.name.includes(suffix) && c.name.includes('registro');
             return isMyTopic || isMyName;
         });
-        if (oldCh) await oldCh.delete('Reinicio de registro').catch(()=>{});
+        if (oldCh) await oldCh.delete('Reinicio').catch(()=>{});
 
-        // 3. Reparación de Categoría
-        let catId = config.categories.private_registration || config.categories.registration;
+        // 3. OBTENER O REPARAR CATEGORÍA
+        let catId = config.categories.private_registration;
         if (!guild.channels.cache.get(catId)) {
-            // Si la categoría no existe, crearla y guardar
-            const newCat = await guild.channels.create({
-                name: '🔐 Rᴇɢɪsᴛʀᴏ-Pʀɪᴠᴀᴅᴏ',
-                type: ChannelType.GuildCategory,
-                permissionOverwrites: [{ id: guild.id, deny: [PermissionsBitField.Flags.ViewChannel] }]
-            });
-            config.categories.private_registration = newCat.id;
-            saveGuildConfig(guild.id, config);
-            catId = newCat.id;
+            // Si no existe, buscar la pública o crear nueva
+            catId = config.categories.registration;
+            // Si la pública tampoco existe, crear una privada nueva
+            if (!guild.channels.cache.get(catId)) {
+                const newCat = await guild.channels.create({
+                    name: '🔐 Rᴇɢɪsᴛʀᴏ-Pʀɪᴠᴀᴅᴏ',
+                    type: ChannelType.GuildCategory,
+                    permissionOverwrites: [{ id: guild.id, deny: [PermissionsBitField.Flags.ViewChannel] }]
+                });
+                config.categories.private_registration = newCat.id;
+                saveGuildConfig(guild.id, config);
+                catId = newCat.id;
+            }
         }
 
-        // 4. Crear Canal
+        // 4. CREAR CANAL CON ETIQUETA (TOPIC)
         const cleanName = member.user.username.toLowerCase().replace(/[^a-z0-9]/g, '');
-        const chName = `registro-${cleanName}-${suffix}`;
-        const channelTopic = `USER:${member.id} | SYSTEM:REGISTRO | NO BORRAR MANUALMENTE`;
-
         const channel = await guild.channels.create({
-            name: chName,
+            name: `registro-${cleanName}-${suffix}`,
             type: ChannelType.GuildText,
             parent: catId,
-            topic: channelTopic,
+            topic: `USER_ID:${member.id} | TYPE:REGISTRO`, // ETIQUETA CLAVE
             permissionOverwrites: [
                 { id: guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
                 { id: member.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] },
@@ -74,10 +75,10 @@ async function iniciarRegistro(member) {
             ]
         });
 
-        // 5. Inicio del Registro
-        const season = config.season !== undefined ? config.season : 0;
+        // 5. MENSAJE DE BIENVENIDA PRIVADO
+        const season = config.season || 0;
         await channel.send(`👋 Hola ${member}. Bienvenido a la **Season ${season}** de **${guild.name}**.\nPor favor, indica tu **ID de PlayStation**.`);
-        
+
         const idMsg = await recibirRespuesta(member, channel);
         if (!idMsg) return; 
         const idPlay = idMsg.content;
@@ -87,12 +88,12 @@ async function iniciarRegistro(member) {
         if (!tMsg) return;
         const tName = tMsg.content.trim();
 
-        // Lógica de Tribus
+        // Lógica Tribu
         let tribes = loadTribes(guild.id);
         if (tribes[tName]) {
             await channel.send(`La tribu **${tName}** existe. ¿Te unes? (si)`);
             const conf = await recibirRespuesta(member, channel);
-            if (!conf || !['si','yes','s','sí'].includes(conf.content.toLowerCase())) return channel.send('Cancelado.');
+            if (!conf || !['si','yes','s'].includes(conf.content.toLowerCase())) return channel.send('Cancelado.');
         }
 
         let tRole = guild.roles.cache.find(r => r.name === tName);
@@ -101,7 +102,7 @@ async function iniciarRegistro(member) {
         if (!tData) {
             if (!tRole) tRole = await guild.roles.create({ name: tName, color: 'Random' });
             
-            // Reparar categoría tribus si falta
+            // Reparar categoría tribus
             let tCatId = config.categories.tribes;
             if (!guild.channels.cache.get(tCatId)) {
                 const newTCat = await guild.channels.create({ name: 'Tʀɪʙᴜs', type: ChannelType.GuildCategory });
@@ -123,26 +124,21 @@ async function iniciarRegistro(member) {
             if (!tRole) tRole = await guild.roles.cache.find(r => r.name === tName);
         }
 
-        // Finalizar y Asignar Roles
+        // Finalizar
         const rank = tData.members.length === 0 ? 'Líder' : 'Miembro';
-        
         if (tRole) await member.roles.add(tRole).catch(()=>{});
         await member.roles.add(survivorRole).catch(()=>{});
-        await member.roles.remove(unverifiedRole).catch(()=>{}); // Quitar Rol No Verificado
-
+        await member.roles.remove(unverifiedRole).catch(()=>{});
         if (rank === 'Líder') {
             const lRole = guild.roles.cache.get(config.roles.leader);
             if (lRole) await member.roles.add(lRole).catch(()=>{});
         }
 
-        // Guardar
         tData.members.push({ username: member.user.username, idPlay, discordId: member.id, hasKit: false, warnings: 0, rango: rank });
         saveTribes(guild.id, tribes);
         await updateLog(guild, member.client);
 
-        // ============================================================
-        // 📢 MENSAJE DE BIENVENIDA PÚBLICO (TU CÓDIGO SOLICITADO)
-        // ============================================================
+        // 📢 MENSAJE PÚBLICO (TU EMBED SOLICITADO)
         const welcomeChan = guild.channels.cache.get(config.channels.welcome);
         if (welcomeChan) {
             const welcomeEmbed = new EmbedBuilder()
@@ -162,10 +158,13 @@ async function iniciarRegistro(member) {
             welcomeChan.send({ embeds: [welcomeEmbed] }).catch(() => {});
         }
 
-        // Borrar canal de registro
         setTimeout(() => channel.delete().catch(()=>{}), 5000);
 
-    } catch (e) { console.error(e); } finally { processingMembers.delete(member.id); }
+    } catch (e) {
+        console.error(`Error registro ${member.user.tag}:`, e);
+    } finally {
+        processingMembers.delete(member.id);
+    }
 }
 
 function recibirRespuesta(m, c) {
