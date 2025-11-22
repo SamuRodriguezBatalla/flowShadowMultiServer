@@ -1,4 +1,4 @@
-const { Events, MessageFlags, EmbedBuilder } = require('discord.js');
+const { Events, MessageFlags, EmbedBuilder, ChannelType } = require('discord.js');
 const { loadGuildConfig, loadTribes, saveTribes, isPremium } = require('../utils/dataManager');
 const { iniciarRegistro } = require('./guildMemberAdd'); 
 
@@ -12,69 +12,69 @@ module.exports = {
 
         const guild = message.guild;
         const member = message.member;
+        
+        // Si el miembro no está cacheado, salimos para evitar errores
+        if (!member) return;
+
         const config = loadGuildConfig(guild.id);
 
         if (config) {
             const unverifiedId = config.roles.unverified;
             
-            // 1. BLOQUEO DE NO VERIFICADOS (Portero Estricto)
+            // ==================================================================
+            // 1. BLOQUEO DE NO VERIFICADOS (Portero Inteligente)
+            // ==================================================================
             if (unverifiedId && member.roles.cache.has(unverifiedId)) {
                 
-                // CONDICIÓN ESTRICTA: Solo permitimos hablar si el canal empieza por "registro-"
-                // Ya NO permitimos hablar en toda la categoría, solo en los canales específicos.
-                const isRegistrationChannel = message.channel.name.startsWith('registro-');
+                // EXCEPCIÓN 1: ¿Es un canal de registro por NOMBRE?
+                if (message.channel.name.startsWith('registro-')) return; // DEJAR HABLAR
 
-                if (!isRegistrationChannel) {
-                    
-                    // A) Borrar el mensaje intruso
-                    try { await message.delete(); } catch(e){}
+                // EXCEPCIÓN 2: ¿Es un canal de registro por ETIQUETA (Topic)?
+                if (message.channel.topic && message.channel.topic.includes('SYSTEM:REGISTRO')) return; // DEJAR HABLAR
 
-                    // B) Buscar si ya tiene canal (para darle el link o crearlo)
-                    const normalizedName = member.user.username.toLowerCase().replace(/[^a-z0-9]/g, '');
-                    const channelName = `registro-${normalizedName}-${member.id.slice(-4)}`;
-                    
-                    const privateRegCatId = config.categories.private_registration;
-                    const publicRegCatId = config.categories.registration;
+                // EXCEPCIÓN 3: ¿Es un canal dentro de la categoría privada?
+                const privCat = config.categories.private_registration;
+                if (privCat && message.channel.parentId === privCat) return; // DEJAR HABLAR
 
-                    // Buscamos el canal en las categorías de registro
-                    let existingChannel = guild.channels.cache.find(c => 
-                        (c.parentId === privateRegCatId || c.parentId === publicRegCatId) && 
-                        c.name === channelName
-                    );
+                // --- SI LLEGA AQUÍ, ESTÁ HABLANDO DONDE NO DEBE ---
+                
+                // A) Borrar mensaje
+                try { await message.delete(); } catch(e){}
 
-                    // C) AUTO-REPARACIÓN: Si no tiene canal, se lo creamos AHORA
-                    if (!existingChannel) {
-                        console.log(`🚑 Auto-reparando registro para ${member.user.tag}`);
-                        await iniciarRegistro(member);
-                        
-                        // Mensaje temporal de aviso
-                        const msg = await message.channel.send({ 
-                            content: `⚠️ ${member}, no tenías canal de registro activo. **Te lo acabo de crear.**\nPor favor, busca el canal **#${channelName}** en la lista.` 
+                // B) Comprobar si YA tiene canal (para no crear otro a lo tonto)
+                const suffix = member.id.slice(-4);
+                const existingChannel = guild.channels.cache.find(c => 
+                    c.type === ChannelType.GuildText && 
+                    (c.name.includes(`-${suffix}`) && c.name.startsWith('registro-')) ||
+                    (c.topic && c.topic.includes(`USER:${member.id}`))
+                );
+
+                // C) Redirigir o Reparar
+                if (!existingChannel) {
+                    // Solo si NO tiene canal, le creamos uno
+                    console.log(`🚑 Auto-reparando registro para ${member.user.tag} (Intento hablar en general)`);
+                    await iniciarRegistro(member);
+                } else {
+                    // Si ya tiene canal, le avisamos
+                    const warningEmbed = new EmbedBuilder()
+                        .setColor('Red')
+                        .setTitle('⛔ Acceso Denegado')
+                        .setDescription(`Hola **${member.user.username}**, aún no estás verificado.\n\n👉 **Ve a tu canal:** ${existingChannel}`);
+
+                    try {
+                        await member.send({ embeds: [warningEmbed] });
+                    } catch (err) {
+                        const tempMsg = await message.channel.send({ 
+                            content: `${member}`, 
+                            embeds: [warningEmbed.setFooter({ text: 'Este mensaje se autodestruirá.' })] 
                         });
-                        setTimeout(() => msg.delete().catch(()=>{}), 10000);
-                    } else {
-                        // D) Si TIENE canal, le redirigimos
-                        const warningEmbed = new EmbedBuilder()
-                            .setColor('Red')
-                            .setTitle('⛔ Acceso Denegado')
-                            .setDescription(`Hola **${member.user.username}**, debes completar tu registro antes de hablar.\n\n👉 **Ve a tu canal:** ${existingChannel}`);
-
-                        // Intentar DM, si falla, mensaje temporal
-                        try {
-                            await member.send({ embeds: [warningEmbed] });
-                        } catch (err) {
-                            const tempMsg = await message.channel.send({ 
-                                content: `${member}`, 
-                                embeds: [warningEmbed.setFooter({ text: 'Borrando en 5s...' })] 
-                            });
-                            setTimeout(() => tempMsg.delete().catch(()=>{}), 5000);
-                        }
+                        setTimeout(() => tempMsg.delete().catch(()=>{}), 5000);
                     }
-                    return; // Cortamos ejecución para que no procese nada más
                 }
+                return; 
             }
 
-            // 2. CHECK-IN PASIVO
+            // 2. CHECK-IN PASIVO (Solo para verificados)
             let tribes = loadTribes(guild.id);
             let modified = false;
             let refreshedTribe = null;

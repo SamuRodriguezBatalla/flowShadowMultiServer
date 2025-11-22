@@ -2,7 +2,7 @@ const { SlashCommandBuilder, PermissionFlagsBits, ChannelType, EmbedBuilder, Act
 const { saveGuildConfig, loadGuildConfig } = require('../utils/dataManager');
 
 // 👇 ENLACE A TU SERVIDOR DE SOPORTE
-const SUPPORT_INVITE_LINK = 'https://discord.gg/TU_LINK_DE_INVITACION_AQUI'; 
+const SUPPORT_INVITE_LINK = 'https://discord.gg/pBPRS64GKq'; 
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -11,7 +11,13 @@ module.exports = {
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
     async execute(interaction) {
-        await interaction.deferReply();
+        // 1. PROTECCIÓN ANTI-TIMEOUT
+        try { 
+            await interaction.deferReply(); 
+        } catch (e) { 
+            return console.log("La interacción de setup caducó."); 
+        }
+
         const guild = interaction.guild;
         let config = loadGuildConfig(guild.id) || { roles: {}, channels: {}, categories: {} };
 
@@ -19,7 +25,7 @@ module.exports = {
             roles: { survivor: 'Superviviente', unverified: 'No verificado', leader: 'Líder de Tribu' },
             categories: { 
                 register: '📝 Zᴏɴᴀ ᴅᴇ Rᴇɢɪsᴛʀᴏ', 
-                private_register: '🔐 Rᴇɢɪsᴛʀᴏ-Pʀɪᴠᴀᴅᴏ', // <--- ESTA ES LA IMPORTANTE
+                private_register: '🔐 Rᴇɢɪsᴛʀᴏ-Pʀɪᴠᴀᴅᴏ', 
                 tribes: 'Tʀɪʙᴜs' 
             },
             channels: { welcome: '┏「👋」ʙɪᴇɴᴠᴇɴɪᴅᴀ', log: '┣「📖」ʀᴇɢɪsᴛʀᴏ-ᴅᴇ-ᴛʀɪʙᴜ', checkin: '┣「⏱️」ᴄʜᴇᴄᴋ-ɪɴ', goodbye: '┣「🚪」ʙʏᴇ', bans: '┗「🚫」ʙᴀɴᴇᴀᴅᴏs', leaderRoom: '👑・sᴀʟᴀ-ᴅᴇ-lɪᴅᴇʀᴇs' }
@@ -51,29 +57,31 @@ module.exports = {
             config.roles.survivor = await ensureRole('survivor', DEFAULTS.roles.survivor, '#00FF00');
             config.roles.leader = await ensureRole('leader', DEFAULTS.roles.leader, '#FFD700');
 
-            // 2. CATEGORÍAS (Aquí se crea la privada)
+            // 2. CATEGORÍAS
             config.categories.registration = await ensureCat('registration', DEFAULTS.categories.register);
-            config.categories.private_registration = await ensureCat('private_registration', DEFAULTS.categories.private_register); 
-            config.categories.tribes = await ensureCat('tribes', DEFAULTS.categories.tribes);
             
+            // --- CATEGORÍA PRIVADA (CON PERMISOS DE SEGURIDAD) ---
+            config.categories.private_registration = await ensureCat('private_registration', DEFAULTS.categories.private_register);
+            const privateCat = guild.channels.cache.get(config.categories.private_registration);
+            if (privateCat) {
+                await privateCat.permissionOverwrites.edit(guild.id, { ViewChannel: false });
+            }
+
+            config.categories.tribes = await ensureCat('tribes', DEFAULTS.categories.tribes);
             const regCatId = config.categories.registration;
 
             // 3. CANALES
             config.channels.welcome = await ensureChan('welcome', DEFAULTS.channels.welcome, regCatId);
-            // (Mensaje bienvenida opcional...)
-
             config.channels.log = await ensureChan('log', DEFAULTS.channels.log, regCatId);
             
             config.channels.checkin_log = await ensureChan('checkin_log', DEFAULTS.channels.checkin, regCatId);
             const checkinChan = guild.channels.cache.get(config.channels.checkin_log);
             if (checkinChan) await checkinChan.permissionOverwrites.edit(guild.id, { SendMessages: false });
-            // (Mensaje checkin opcional...)
 
             config.channels.goodbye = await ensureChan('goodbye', DEFAULTS.channels.goodbye, regCatId);
             config.channels.ban_notifications = await ensureChan('ban_notifications', DEFAULTS.channels.bans, regCatId);
             config.channels.leader_channel = await ensureChan('leader_channel', DEFAULTS.channels.leaderRoom, config.categories.tribes);
             
-            // Permisos sala líderes
             const leaderChan = guild.channels.cache.get(config.channels.leader_channel);
             if (leaderChan) {
                 await leaderChan.permissionOverwrites.edit(guild.id, { ViewChannel: false });
@@ -83,8 +91,12 @@ module.exports = {
             saveGuildConfig(guild.id, config);
 
             const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setLabel('🆘 Unirse al Servidor de Soporte').setStyle(ButtonStyle.Link).setURL(SUPPORT_INVITE_LINK));
-            await interaction.editReply({ content: `✅ **Setup Completo.**\n📂 Categoría Privada: **${DEFAULTS.categories.private_register}** creada.`, components: [row] });
+            
+            await interaction.editReply({ content: `✅ **Setup Completo.**\n📂 Categoría Privada: **${DEFAULTS.categories.private_register}** configurada.`, components: [row] });
 
-        } catch (error) { console.error(error); await interaction.editReply('❌ Error en setup.'); }
+        } catch (error) { 
+            console.error(error); 
+            await interaction.editReply(`❌ Error en setup: ${error.message}`); 
+        }
     },
 };

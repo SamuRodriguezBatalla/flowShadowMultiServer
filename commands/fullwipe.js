@@ -1,112 +1,111 @@
-const { SlashCommandBuilder, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType, EmbedBuilder } = require('discord.js');
-const { resetServerData, loadGuildConfig } = require('../utils/dataManager');
+const { SlashCommandBuilder, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType, EmbedBuilder, ChannelType } = require('discord.js');
+const { resetServerData, loadGuildConfig, saveGuildConfig } = require('../utils/dataManager');
 const { updateLog } = require('../utils/logger');
+const { sincronizarRegistros } = require('../utils/syncManager');
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('fullwipe')
-        .setDescription('☢️ BORRADO TOTAL: Reinicia todo a CERO.')
+        .setDescription('☢️ BORRADO TOTAL: Reinicia todo a CERO (Season 0).')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
     async execute(interaction) {
-        const guild = interaction.guild;
-        const currentChannelId = interaction.channelId; // Guardamos ID para protegerlo
+        try { await interaction.deferReply({ fetchReply: true }); } catch (e) { return; }
 
         const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('cancel_wipe').setLabel('Cancelar').setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId('confirm_wipe').setLabel('SÍ, REINICIAR TODO').setStyle(ButtonStyle.Danger)
+            new ButtonBuilder().setCustomId('cancel').setLabel('Cancelar').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('confirm').setLabel('SÍ, REINICIAR A SEASON 0').setStyle(ButtonStyle.Danger)
         );
 
-        const warningEmbed = new EmbedBuilder()
-            .setTitle('☢️ FULL WIPE DETECTED')
-            .setDescription('Se borrarán tribus, historial y registros.')
-            .setColor('DarkRed');
+        await interaction.editReply({ 
+            embeds: [new EmbedBuilder().setTitle('☢️ FULL WIPE DETECTED').setDescription('⚠️ **PELIGRO**\nSe borrarán todas las tribus y canales de registro.\n**La Season volverá a 0.**').setColor('DarkRed')],
+            components: [row] 
+        });
 
-        // Usamos fetchReply para mantener la referencia
-        const response = await interaction.reply({ embeds: [warningEmbed], components: [row], fetchReply: true });
-        
-        const collector = response.createMessageComponentCollector({ componentType: ComponentType.Button, time: 30000 });
+        const collector = interaction.channel.createMessageComponentCollector({ 
+            filter: i => i.user.id === interaction.user.id && i.message.interaction.id === interaction.id,
+            time: 30000, max: 1
+        });
 
         collector.on('collect', async i => {
-            if (i.user.id !== interaction.user.id) return i.reply({ content: '❌', ephemeral: true });
-            if (i.customId === 'cancel_wipe') return i.update({ content: '✅ Cancelado.', embeds: [], components: [] });
+            if (i.customId === 'cancel') return i.update({ content: 'Cancelado.', embeds: [], components: [] });
+            
+            await i.update({ content: '☢️ **Ejecutando Barrido Universal...**', embeds: [], components: [] });
 
-            if (i.customId === 'confirm_wipe') {
-                try {
-                    await i.update({ content: '☢️ **Ejecutando Full Wipe...** (Espere...)', embeds: [], components: [] });
-                    
-                    // 1. RESET DATOS
-                    const newConfig = resetServerData(guild.id);
-                    if (!newConfig) throw new Error("Error de configuración.");
+            try {
+                const guild = interaction.guild;
+                console.log(`\n=== ☢️ FULLWIPE SEASON 0 ===`);
+                
+                // 1. RESETEO DE DATOS
+                resetServerData(guild.id); 
+                let config = loadGuildConfig(guild.id) || { roles: {}, channels: {}, categories: {} };
+                config.season = 0; // FORCE 0
+                saveGuildConfig(guild.id, config);
 
-                    const safeIDs = [
-                        newConfig.roles.unverified, newConfig.roles.survivor, newConfig.roles.leader, 
-                        guild.id, ...(newConfig.roles.protected || [])
-                    ];
-                    
-                    // 2. RESET ROLES
-                    const roles = Array.from(guild.roles.cache.values());
-                    for (const role of roles) {
-                        if (!safeIDs.includes(role.id) && !role.managed && !role.permissions.has(PermissionFlagsBits.Administrator)) {
-                            await role.delete('Full Wipe').catch(() => {});
-                        }
+                // 2. BORRAR ROLES (Menos protegidos)
+                const safeIDs = [config.roles.unverified, config.roles.survivor, config.roles.leader, guild.id, ...(config.roles.protected || [])];
+                const roles = await guild.roles.fetch();
+                for (const r of roles.values()) {
+                    if (!safeIDs.includes(r.id) && !r.managed && !r.permissions.has('Administrator')) await r.delete().catch(()=>{});
+                }
+
+                // ============================================================
+                // 3. BORRADO DE CANALES (UNIVERSAL POR NOMBRE Y TOPIC)
+                // ============================================================
+                const allChannels = await guild.channels.fetch();
+                const systemChannelIds = Object.values(config.channels || {});
+
+                for (const channel of allChannels.values()) {
+                    if (channel.type !== ChannelType.GuildText) continue;
+                    if (channel.id === interaction.channelId) continue;
+                    if (systemChannelIds.includes(channel.id)) continue;
+
+                    let shouldDelete = false;
+                    const name = channel.name.toLowerCase();
+
+                    // A. Por Nombre (Registros viejos y nuevos)
+                    if (name.includes('registro-')) shouldDelete = true;
+
+                    // B. Por Topic (Etiqueta de sistema)
+                    if (channel.topic && channel.topic.includes('SYSTEM:REGISTRO')) shouldDelete = true;
+
+                    // C. Por Categoría de Tribus
+                    if (config.categories.tribes && channel.parentId === config.categories.tribes) {
+                        if (channel.id !== config.channels.leader_channel) shouldDelete = true;
                     }
 
-                    // 3. RESET CANALES TRIBUS
-                    const tribeCat = guild.channels.cache.get(newConfig.categories.tribes);
-                    if (tribeCat) {
-                        for (const c of tribeCat.children.cache.values()) {
-                            if (c.id !== newConfig.channels.leader_channel && c.id !== currentChannelId) {
-                                await c.delete('Full Wipe').catch(() => {});
-                            }
-                        }
-                    }
-
-                    // 4. RESET CANALES REGISTRO
-                    const catsToClean = [newConfig.categories.registration, newConfig.categories.private_registration];
-                    for (const catId of catsToClean) {
-                        if (!catId) continue;
-                        const cat = guild.channels.cache.get(catId);
-                        if (cat) {
-                            for (const channel of cat.children.cache.values()) {
-                                const systemChannels = Object.values(newConfig.channels);
-                                // PROTECCIÓN: No borrar canales de sistema NI el canal actual
-                                if (!systemChannels.includes(channel.id) && channel.id !== currentChannelId) {
-                                    await channel.delete('Full Wipe Registry').catch(() => {});
-                                }
-                            }
-                        }
-                    }
-
-                    await updateLog(guild, interaction.client);
-                    
-                    // Anuncio en Bienvenida (Más seguro)
-                    const welcomeChan = guild.channels.cache.get(newConfig.channels.welcome);
-                    if (welcomeChan) {
-                        await welcomeChan.send({ 
-                            embeds: [new EmbedBuilder().setTitle('🌍 MUNDO REINICIADO').setDescription('Season 0 iniciada.').setColor('Red')] 
-                        }).catch(() => {});
-                    }
-
-                    // 5. CONFIRMACIÓN FINAL SEGURA
-                    // Intentamos responder en el canal. Si falla (porque se borró), mandamos DM. Si falla, no hacemos nada.
-                    try {
-                        await interaction.followUp({ content: `✅ **Full Wipe Completado.**`, ephemeral: true });
-                    } catch (e) {
-                        // Si el canal murió, intentamos avisar al Admin por privado
-                        await interaction.user.send(`✅ **Full Wipe Completado** en ${guild.name}. (El canal donde estabas fue eliminado)`).catch(()=>{});
-                    }
-
-                } catch (error) {
-                    console.error("Error FullWipe:", error);
-                    // Intento desesperado de reportar error
-                    try { 
-                        await interaction.followUp({ content: `❌ Error crítico: ${error.message}`, ephemeral: true }); 
-                    } catch (e) {
-                        console.log("No se pudo enviar el reporte de error al usuario.");
+                    if (shouldDelete) {
+                        console.log(`🗑️ Eliminando: ${channel.name}`);
+                        await channel.delete('Full Wipe').catch(e => console.log(`   ❌ Error: ${e.message}`));
                     }
                 }
+                // ============================================================
+
+                await updateLog(guild, interaction.client);
+
+                // 4. RESET MIEMBROS (SIN TIMEOUT)
+                const ur = guild.roles.cache.get(config.roles.unverified);
+                // Fetch seguro
+                const members = await guild.members.fetch().catch(() => guild.members.cache);
+                
+                if (ur) {
+                    for (const m of members.values()) {
+                        if (!m.user.bot && !m.permissions.has('Administrator')) {
+                            // Reset total: Setear solo Unverified borra los demás
+                            await m.roles.set([ur]).catch(()=>{});
+                        }
+                    }
+                }
+
+                await interaction.editReply({ content: `✅ **Full Wipe Completado.**\n📉 Season actual: **0**.\n♻️ Regenerando registros...`, components: [] });
+
+                // 5. CREAR CANALES NUEVOS
+                sincronizarRegistros(guild, config);
+
+            } catch (e) {
+                console.error(e);
+                await interaction.editReply({ content: `❌ Error: ${e.message}`, components: [] });
             }
         });
-    },
+    }
 };
