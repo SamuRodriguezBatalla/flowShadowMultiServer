@@ -1,7 +1,7 @@
 const { Events } = require('discord.js');
-const { loadTribes, saveTribes, loadGuildConfig } = require('../utils/dataManager'); // <--- ACTUALIZADO
-const { updateLog } = require('../utils/logger');
+const { loadGuildConfig, loadTribes, saveTribes } = require('../utils/dataManager');
 const { iniciarRegistro } = require('./guildMemberAdd');
+const { updateLog } = require('../utils/logger');
 
 module.exports = {
     name: Events.GuildMemberUpdate,
@@ -9,101 +9,59 @@ module.exports = {
         if (newMember.user.bot) return;
 
         const guild = newMember.guild;
-        
-        // 1. Cargar Configuración
         const config = loadGuildConfig(guild.id);
-        if (!config) return; // Si no hay config, no hacemos nada
+        if (!config) return;
 
-        const unverifiedRole = guild.roles.cache.get(config.roles.unverified);
-        const survivorRole = guild.roles.cache.get(config.roles.survivor);
-
-        if (!unverifiedRole || !survivorRole) return;
+        const unverifiedRole = config.roles.unverified; // ID del rol
 
         // ==================================================================
-        // 1. SINCRONIZACIÓN: DETECTAR SI SE LE QUITÓ UN ROL DE TRIBU MANUALMENTE
+        // 1. DETECTOR DE ROL "NO VERIFICADO" (MANUAL O AUTOMÁTICO)
         // ==================================================================
-        const lostRoles = oldMember.roles.cache.filter(role => !newMember.roles.cache.has(role.id));
+        // Si ANTES no tenía el rol y AHORA SÍ lo tiene...
+        if (!oldMember.roles.cache.has(unverifiedRole) && newMember.roles.cache.has(unverifiedRole)) {
+            console.log(`👀 [Update] ${newMember.user.tag} recibió el rol 'No Verificado'. Iniciando registro...`);
+            try {
+                // Forzamos el inicio del registro inmediatamente
+                await iniciarRegistro(newMember);
+            } catch (e) {
+                console.error(`Error en registro manual de ${newMember.user.tag}:`, e);
+            }
+            return;
+        }
+
+        // ==================================================================
+        // 2. SINCRONIZACIÓN: SI PIERDE UN ROL DE TRIBU
+        // ==================================================================
+        // Esto detecta si le quitas un rol de tribu manualmente para borrarlo de la base de datos
+        const lostRoles = oldMember.roles.cache.filter(r => !newMember.roles.cache.has(r.id));
         
         if (lostRoles.size > 0) {
-            let tribes = loadTribes(guild.id); // <--- Carga local
-            let jsonUpdated = false;
+            let tribes = loadTribes(guild.id);
+            let modified = false;
 
-            for (const [roleId, role] of lostRoles) {
-                const tName = role.name; // Asumimos Nombre Rol = Nombre Tribu
-
+            for (const [id, role] of lostRoles) {
+                const tName = role.name;
                 if (tribes[tName]) {
-                    console.log(`📉 Borrado manual rol tribu: "${tName}" a ${newMember.user.tag}`);
-                    
-                    const tribe = tribes[tName];
-                    const memberIndex = tribe.members.findIndex(m => m.discordId === newMember.id);
+                    const idx = tribes[tName].members.findIndex(m => m.discordId === newMember.id);
+                    if (idx !== -1) {
+                        console.log(`📉 ${newMember.user.tag} perdió el rol de tribu '${tName}'. Actualizando DB...`);
+                        tribes[tName].members.splice(idx, 1);
+                        modified = true;
 
-                    if (memberIndex !== -1) {
-                        tribe.members.splice(memberIndex, 1);
-                        jsonUpdated = true;
-
-                        // Si la tribu se vacía
-                        if (tribe.members.length === 0) {
-                            // Borrar Canal
-                            if (tribe.channelId) {
-                                const channel = guild.channels.cache.get(tribe.channelId);
-                                if (channel) await channel.delete('Tribu vacía').catch(() => {});
+                        // Si la tribu se queda vacía, borrar todo
+                        if (tribes[tName].members.length === 0) {
+                            if (tribes[tName].channelId) {
+                                guild.channels.cache.get(tribes[tName].channelId)?.delete().catch(()=>{});
                             }
-                            // Borrar Rol
-                            const tribeRole = guild.roles.cache.find(r => r.name === tName);
-                            if (tribeRole) await tribeRole.delete('Tribu vacía').catch(() => {});
-
+                            guild.roles.cache.find(r => r.name === tName)?.delete().catch(()=>{});
                             delete tribes[tName];
                         }
                     }
                 }
             }
-
-            if (jsonUpdated) {
+            if (modified) {
                 saveTribes(guild.id, tribes);
-                await updateLog(guild, newMember.client);
-            }
-        }
-
-        // ==================================================================
-        // 2. INICIO DE REGISTRO MANUAL (Si un admin le pone "No Verificado")
-        // ==================================================================
-        const oldHasUnverified = oldMember.roles.cache.has(unverifiedRole.id);
-        const newHasUnverified = newMember.roles.cache.has(unverifiedRole.id);
-        const isInitialJoin = oldMember.roles.cache.size === 1;
-
-        if (!oldHasUnverified && newHasUnverified) {
-            if (isInitialJoin) return; 
-            console.log(`👀 Registro manual iniciado para: ${newMember.user.tag}`);
-            try { await iniciarRegistro(newMember); } catch (e) { console.error(e); }
-            return; 
-        }
-
-        // ==================================================================
-        // 3. POLICÍA DE TRIBUS (Superviviente sin tribu -> Reset)
-        // ==================================================================
-        const isSurvivor = newMember.roles.cache.has(survivorRole.id);
-        const isAdmin = newMember.permissions.has('Administrator') || newMember.roles.cache.some(r => r.name === 'ADMIN');
-
-        if (isSurvivor && !isAdmin) {
-            const currentTribes = loadTribes(guild.id);
-            const tribeNames = Object.keys(currentTribes);
-            // Verificamos si tiene algún rol que coincida con una tribu registrada
-            const hasTribeRole = newMember.roles.cache.some(r => tribeNames.includes(r.name));
-
-            if (!hasTribeRole) {
-                console.log(`📉 ALERTA: ${newMember.user.tag} es Superviviente sin tribu. Reseteando...`);
-                
-                const leaderRole = guild.roles.cache.get(config.roles.leader);
-                const rolesToStrip = [survivorRole.id];
-                
-                if (leaderRole && newMember.roles.cache.has(leaderRole.id)) {
-                    rolesToStrip.push(leaderRole.id);
-                }
-                
-                try {
-                    await newMember.roles.remove(rolesToStrip);
-                    await iniciarRegistro(newMember); 
-                } catch (e) { console.error(e); }
+                updateLog(guild, newMember.client);
             }
         }
     },

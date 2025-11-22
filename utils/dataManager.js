@@ -136,9 +136,16 @@ function updateLastAlert(guildId) {
     db.prepare('UPDATE premium_guilds SET last_alert = ? WHERE guild_id = ?').run(Date.now(), guildId);
 }
 
+function getAvailableSeasons(guildId) {
+    // Consulta la tabla 'season_history' para obtener los números de temporada archivados
+    const rows = db.prepare('SELECT DISTINCT season FROM season_history WHERE guild_id = ? ORDER BY season DESC').all(guildId);
+    return rows.map(row => String(row.season)); // Devolvemos como string para la API de Discord
+}
+
 module.exports = { 
     loadGuildConfig, saveGuildConfig, 
     loadTribes, saveTribes,
     archiveSeason, loadSeasonHistory, resetServerData,
-    addPremium, removePremium, isPremium, setUnlimited, getAllPremiumGuilds, updateLastAlert
+    addPremium, removePremium, isPremium, setUnlimited, getAllPremiumGuilds, updateLastAlert,
+    getAvailableSeasons
 };

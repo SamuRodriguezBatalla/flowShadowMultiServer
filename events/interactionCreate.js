@@ -7,6 +7,11 @@ module.exports = {
     name: Events.InteractionCreate,
     async execute(interaction) {
         
+        // Inicializar el Map de votos si no existe (Para el nuevo sistema /suggestvote)
+        if (!interaction.client.suggestVotes) {
+             interaction.client.suggestVotes = new Map();
+        }
+        
         // ==================================================================
         // 🛡️ SISTEMA DE LICENCIAS (ANTI-PIRATERÍA)
         // ==================================================================
@@ -15,11 +20,15 @@ module.exports = {
             const commandName = interaction.commandName || '';
             
             // Lista blanca de comandos que funcionan sin licencia
-            const safeCommands = ['soporte', 'botinfo', 'adminlicense']; 
+            const safeCommands = ['soporte', 'botinfo', 'adminlicense', 'syncchannels']; 
 
             if (!hasLicense && !safeCommands.includes(commandName)) {
                 try {
-                    if (interaction.user.id === interaction.guild.ownerId) {
+                    // Nota: Asumimos que TU_ID_AQUI fue reemplazado en el contexto anterior.
+                    const MY_ID = 'TU_ID_AQUI'; // Reemplaza con tu ID para el bypass
+                    const isOwner = interaction.user.id === MY_ID || interaction.user.id === interaction.guild.ownerId;
+
+                    if (isOwner) {
                         await interaction.reply({ 
                             content: '🔒 **LICENCIA INACTIVA**\nEste servidor no tiene una licencia activa.\nUsa `/soporte` para contactar con ventas.', 
                             ephemeral: true 
@@ -28,56 +37,82 @@ module.exports = {
                         await interaction.reply({ content: '🔒 Bot en mantenimiento (Licencia inactiva).', ephemeral: true });
                     }
                 } catch (e) {
-                    // Si falla responder (interacción muerta), ignoramos para no crashear
+                    // Si falla responder (interacción muerta), ignoramos
                 }
                 return;
             }
         }
 
         // ==================================================================
-        // 1. MANEJO DE AUTOCOMPLETADO
+        // 1. MANEJO DE AUTOCOMPLETADO Y COMANDOS DE BARRA (/)
         // ==================================================================
         if (interaction.isAutocomplete()) {
             const command = interaction.client.commands.get(interaction.commandName);
             if (!command) return;
-
-            try {
-                await command.autocomplete(interaction);
-            } catch (error) {
-                console.error(`Error en autocomplete (${interaction.commandName}):`, error);
-            }
+            try { await command.autocomplete(interaction); } catch (error) { console.error(`Error en autocomplete:`, error); }
             return;
         }
 
-        // ==================================================================
-        // 2. MANEJO DE COMANDOS DE BARRA (/)
-        // ==================================================================
         if (interaction.isChatInputCommand()) {
             const command = interaction.client.commands.get(interaction.commandName);
             if (!command) return;
-
             try {
                 await command.execute(interaction);
             } catch (error) {
                 console.error(`Error ejecutando comando ${interaction.commandName}:`, error);
-                
-                // Manejo seguro de errores (Anti-Crash 10062 / 40060)
+                const errorMsg = { content: '❌ Hubo un error al ejecutar este comando.', flags: MessageFlags.Ephemeral };
                 try {
-                    const errorMsg = { content: '❌ Hubo un error al ejecutar este comando.', flags: MessageFlags.Ephemeral };
-                    
-                    if (interaction.replied || interaction.deferred) {
-                        await interaction.followUp(errorMsg);
-                    } else {
-                        await interaction.reply(errorMsg);
-                    }
-                } catch (sendError) {
-                    // Si la interacción ya expiró o no se puede responder, no hacemos nada
-                    // Esto evita que el bot se apague por un error de "Unknown Interaction"
-                    console.log('⚠️ No se pudo enviar el mensaje de error al usuario (Interacción expirada).');
-                }
+                    if (interaction.replied || interaction.deferred) { await interaction.followUp(errorMsg); } 
+                    else { await interaction.reply(errorMsg); }
+                } catch (sendError) {}
             }
             return;
         }
+
+        // ==================================================================
+        // 2. MANEJO DE VOTACIÓN DE SUGERENCIA (Botones 'suggest_vote_')
+        // ==================================================================
+        if (interaction.isButton() && interaction.customId.startsWith('suggest_vote_')) {
+            const voteId = `${interaction.guild.id}:${interaction.message.id}`;
+            const voteData = interaction.client.suggestVotes?.get(voteId);
+            
+            if (!voteData) {
+                return interaction.reply({ content: '❌ Esta votación ha finalizado o ha expirado.', ephemeral: true });
+            }
+
+            const userId = interaction.user.id;
+            
+            if (voteData.voters.has(userId)) {
+                return interaction.reply({ content: '❌ Ya has votado en esta sugerencia.', ephemeral: true });
+            }
+            
+            await interaction.deferUpdate();
+
+            const isYes = interaction.customId === 'suggest_vote_yes';
+            
+            // Registrar voto y votante
+            if (isYes) {
+                voteData.yes++;
+            } else {
+                voteData.no++;
+            }
+            voteData.voters.add(userId);
+            
+            // Actualizar Embed
+            const totalVotes = voteData.yes + voteData.no;
+            const updatedEmbed = EmbedBuilder.from(interaction.message.embeds[0])
+                .setFields(
+                    interaction.message.embeds[0].fields[0], 
+                    interaction.message.embeds[0].fields[1], 
+                    { name: '📊 Resultados', value: `Sí: ${voteData.yes} | No: ${voteData.no} (Total: ${totalVotes})`, inline: false }
+                );
+                
+            await interaction.message.edit({ embeds: [updatedEmbed] }).catch(console.error);
+
+            // Guardar estado actualizado en el mapa global
+            interaction.client.suggestVotes.set(voteId, voteData);
+        }
+
 
         // ==================================================================
         // 3. MANEJO DE VOTACIÓN DE TRIBU (Select Menu)
@@ -88,30 +123,23 @@ module.exports = {
                 const tribeName = interaction.customId.split('_')[2]; 
                 const candidateId = interaction.values[0]; 
                 
-                // Defer inmediato para evitar timeouts
                 await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
                 let tribes = loadTribes(guildId); 
                 const myTribeData = tribes[tribeName];
                 
-                if (!myTribeData) {
-                    return interaction.followUp('❌ Error: La tribu ya no existe.');
-                }
-
-                if (!myTribeData.members.some(m => m.discordId === interaction.user.id)) {
-                    return interaction.followUp('❌ No puedes votar, no eres miembro de esta tribu.');
-                }
+                if (!myTribeData) return interaction.followUp('❌ Error: La tribu ya no existe.');
+                if (!myTribeData.members.some(m => m.discordId === interaction.user.id)) return interaction.followUp('❌ No puedes votar, no eres miembro de esta tribu.');
                 
                 // Registrar voto
                 if (!myTribeData.votes) myTribeData.votes = {};
                 myTribeData.votes[interaction.user.id] = candidateId; 
                 
-                // Calcular resultados
+                // Calcular resultados y chequear victoria
                 const totalVotes = Object.values(myTribeData.votes).filter(id => id === candidateId).length;
                 const totalMembers = myTribeData.members.length;
                 const votesNeeded = Math.floor(totalMembers / 2) + 1;
                 
-                // Victoria (Golpe de Estado)
                 if (totalVotes >= votesNeeded) {
                     // Quitar líderes antiguos
                     myTribeData.members.forEach(m => {
@@ -140,16 +168,12 @@ module.exports = {
                     myTribeData.votes = {}; // Reset votos
                     saveTribes(guildId, tribes);
                     
-                    // Anuncio público
                     interaction.channel.send(`🚨 **¡CAMBIO DE PODER!**\n👑 **Nuevo Líder de ${tribeName}:** <@${candidateId}> (Mayoría absoluta).`).catch(()=>{});
-
-                    // Actualizar Embed
                     const { embed, actionRow } = generateVoteEmbed(myTribeData, tribeName, interaction.client);
                     await interaction.message.edit({ embeds: [embed], components: [actionRow] });
 
                     return interaction.deleteReply();
                 } else {
-                    // Voto normal
                     saveTribes(guildId, tribes);
                     const { embed, actionRow } = generateVoteEmbed(myTribeData, tribeName, interaction.client);
                     await interaction.message.edit({ embeds: [embed], components: [actionRow] });
@@ -160,7 +184,7 @@ module.exports = {
                 try { await interaction.followUp({ content: '❌ Error al procesar el voto.', ephemeral: true }); } catch(e){}
             }
         }
-
+        
         // ==================================================================
         // 4. SISTEMA DE TICKETS (Botones)
         // ==================================================================

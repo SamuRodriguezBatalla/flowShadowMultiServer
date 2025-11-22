@@ -1,7 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { getAllPremiumGuilds } = require('../utils/dataManager');
 
-// 🔒 TU ID REAL
+// 🔒 TU ID REAL (Asegúrate de que sea la tuya)
 const OWNER_ID = '749826568477474888'; 
 
 module.exports = {
@@ -16,41 +16,47 @@ module.exports = {
         }
 
         // 2. OBTENER DATOS
-        const clients = getAllPremiumGuilds(); // Esta función ya la creamos en dataManager
+        const clients = getAllPremiumGuilds(); 
 
         if (!clients || clients.length === 0) {
             return interaction.reply({ content: '📂 La base de datos de clientes está vacía.', ephemeral: true });
         }
 
-        // 3. CONSTRUIR LA TABLA
-        // Usamos bloques de código ```text``` para que las columnas se alineen bien
-        let tableHeader = "CLIENTE          | TIPO      | DÍAS | ID SERVIDOR\n";
-        let separator   = "---------------------------------------------------\n";
+        // 3. CONSTRUIR LA TABLA MEJORADA
+        // Ajustamos el header para incluir la columna de Servidor
+        let tableHeader = "CLIENTE          | SERVIDOR         | TIPO      | DÍAS\n";
+        let separator   = "------------------------------------------------------\n";
         let tableBody   = "";
 
         const now = Date.now();
-        let totalIncomeEstimado = 0; // Contador visual simple
+        let totalIncomeEstimado = 0; 
 
         clients.forEach(client => {
-            // Cálculo de días
+            // A. Cálculo de días activos
             const daysActive = Math.floor((now - client.added_at) / (1000 * 60 * 60 * 24));
             
-            // Formateo de columnas (padding para alinear)
-            // Cortamos el nombre a 15 caracteres para que no rompa la tabla
-            const name = (client.client_name || "Desconocido").substring(0, 15).padEnd(16, ' ');
+            // B. Formateo de Cliente (Cortar a 15 chars y rellenar espacios)
+            const clientName = (client.client_name || "Desconocido").substring(0, 15).padEnd(16, ' ');
             
+            // C. Obtener Nombre del Servidor (NUEVO)
+            const guildObj = interaction.client.guilds.cache.get(client.guild_id);
+            // Si el bot está dentro, usa el nombre. Si no, pone "Bot Fuera"
+            const rawServerName = guildObj ? guildObj.name : "❌ (Bot Fuera)";
+            const serverName = rawServerName.substring(0, 15).padEnd(16, ' ');
+
+            // D. Tipo de Licencia
             const type = client.is_unlimited === 1 ? "♾️ VIP " : "📅 Mes ";
             
-            // Si es mensual, sumamos al contador (ejemplo visual)
+            // E. Contador visual de ingresos (solo mensuales)
             if (client.is_unlimited === 0) totalIncomeEstimado++;
 
             const days = `${daysActive}d`.padEnd(4, ' ');
             
-            tableBody += `${name} | ${type} | ${days} | ${client.guild_id}\n`;
+            // F. Construir fila
+            tableBody += `${clientName} | ${serverName} | ${type} | ${days}\n`;
         });
 
-        // Si la lista es muy larga, Discord corta a los 4000 caracteres. 
-        // Cortamos por seguridad si tienes muchísimos clientes.
+        // Recorte de seguridad por si tienes muchísimos clientes
         if (tableBody.length > 3500) {
             tableBody = tableBody.substring(0, 3500) + "\n... (Lista truncada, hay demasiados clientes)";
         }
@@ -62,9 +68,9 @@ module.exports = {
             .setDescription(`\`\`\`text\n${tableHeader}${separator}${tableBody}\`\`\``)
             .addFields(
                 { name: '📊 Resumen', value: `Total Clientes: **${clients.length}**\nDe pago mensual: **${totalIncomeEstimado}**`, inline: true },
-                { name: '🧠 Base de Datos', value: 'SQLite (Local)', inline: true }
+                { name: '🧠 Estado', value: 'Base de datos local (SQLite)', inline: true }
             )
-            .setFooter({ text: 'Informe generado automáticamente' })
+            .setFooter({ text: 'Informe de Administración' })
             .setTimestamp();
 
         await interaction.reply({ embeds: [embed], ephemeral: true });

@@ -1,4 +1,4 @@
-const { Events, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
+const { Events, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
 const { loadTribes, saveTribes, loadGuildConfig, getAllPremiumGuilds, updateLastAlert } = require('../utils/dataManager');
 const { updateLog } = require('../utils/logger');
 const { sincronizarRegistros } = require('../utils/syncManager');
@@ -11,8 +11,10 @@ module.exports = {
     name: Events.ClientReady,
     once: true,
     async execute(client) {
-        console.log(`✅ Bot Online: ${client.user.tag} - V7 (Final Stable).`);
+        console.log(`✅ Bot Online: ${client.user.tag} - V9 (Producción / Admins Seguros).`);
+        
         runMaintenance(client);
+        
         setInterval(() => runMaintenance(client), CHECK_INTERVAL);
     },
 };
@@ -24,12 +26,16 @@ async function runMaintenance(client) {
     for (const guild of client.guilds.cache.values()) {
         try {
             const config = loadGuildConfig(guild.id);
-            if (!config) continue;
+            
+            if (!config) {
+                // Silencioso para no llenar logs si no hay setup
+                continue;
+            }
 
-            // 1. ASIGNACIÓN DE ROLES
+            // 1. AUTO-ROL (Ahora respeta Admins)
             await autoAssignRoles(guild, config);
 
-            // 2. CREAR CANALES
+            // 2. SINCRONIZAR CANALES
             await sincronizarRegistros(guild, config);
 
             // 3. MANTENIMIENTO TRIBUS
@@ -39,6 +45,7 @@ async function runMaintenance(client) {
             console.error(`Error mantenimiento en ${guild.name}:`, e.message);
         }
     }
+    
     await checkPayments(client);
     isSyncing = false;
 }
@@ -48,25 +55,38 @@ async function autoAssignRoles(guild, config) {
     if (!unverifiedRole) return;
 
     try {
-        await guild.members.fetch(); 
+        const members = await guild.members.fetch(); 
         
-        const targetMembers = guild.members.cache.filter(m => {
+        const targets = members.filter(m => {
             if (m.user.bot) return false;
-            if (m.permissions.has(PermissionFlagsBits.Administrator)) return false;
+
+            // 🛡️ PROTECCIÓN DE ADMINISTRADORES ACTIVADA
+            if (m.permissions.has(PermissionFlagsBits.Administrator)) {
+                return false; // Si es admin, NO le tocamos los roles
+            }
             
+            // Comprobar roles del sistema
             const hasUnverified = m.roles.cache.has(config.roles.unverified);
             const hasSurvivor = config.roles.survivor ? m.roles.cache.has(config.roles.survivor) : false;
             const hasLeader = config.roles.leader ? m.roles.cache.has(config.roles.leader) : false;
 
+            // Si NO tiene ninguno, es objetivo
             return !hasUnverified && !hasSurvivor && !hasLeader;
         });
 
-        if (targetMembers.size > 0) {
-            console.log(`👥 [Auto-Role] Procesando ${targetMembers.size} usuarios sin rol.`);
-            for (const [id, member] of targetMembers) {
-                if (guild.members.me.roles.highest.position > member.roles.highest.position) {
-                    await member.roles.add(unverifiedRole).catch(()=>{});
-                }
+        if (targets.size > 0) {
+            console.log(`👥 [Auto-Role] Asignando 'No Verificado' a ${targets.size} usuarios nuevos...`);
+            
+            const botHighestRole = guild.members.me.roles.highest.position;
+
+            if (botHighestRole <= unverifiedRole.position) {
+                console.log(`🛑 [ERROR] Sube mi rol por encima de '${unverifiedRole.name}'.`);
+                return;
+            }
+
+            for (const [id, member] of targets) {
+                await member.roles.add(unverifiedRole).catch(() => {});
+                // Pausa mínima para no saturar
                 await new Promise(r => setTimeout(r, 200));
             }
         }
@@ -79,39 +99,29 @@ async function checkTribes(guild, config, client) {
     let tribes = loadTribes(guild.id);
     let modified = false;
     const now = Date.now();
-    const MS_TO_WARN = 6 * 24 * 60 * 60 * 1000; // 6 días
-    const MS_TO_DELETE = 7 * 24 * 60 * 60 * 1000; // 7 días
+    const MS_TO_WARN = 6 * 24 * 60 * 60 * 1000; 
+    const MS_TO_DELETE = 7 * 24 * 60 * 60 * 1000; 
     const toDelete = [];
 
-    // Definir canal de logs usando 'config' (Esto soluciona el warning)
     const logChannel = config.channels.checkin_log ? guild.channels.cache.get(config.channels.checkin_log) : null;
 
     for (const [tName, tData] of Object.entries(tribes)) {
         const diff = now - (tData.lastActive || 0);
         
-        // Aviso de inactividad
         if (tData.channelId && diff >= MS_TO_WARN && diff < MS_TO_WARN + 3600000) {
             const ch = guild.channels.cache.get(tData.channelId);
             if (ch) ch.send({ embeds: [new EmbedBuilder().setTitle('⚠️ AVISO').setDescription('Check-in necesario.').setColor('Red')] }).catch(()=>{});
         }
-        // Marcar para borrar
+        
         if (diff > MS_TO_DELETE) toDelete.push(tName);
     }
 
     for (const tName of toDelete) {
         const t = tribes[tName];
-        
-        // Borrar canal y rol
         if (t.channelId) guild.channels.cache.get(t.channelId)?.delete().catch(()=>{});
         guild.roles.cache.find(r => r.name === tName)?.delete().catch(()=>{});
         
-        // Notificar en el log público (Usando config)
-        if (logChannel) {
-            logChannel.send({ 
-                embeds: [new EmbedBuilder().setDescription(`💀 **${tName}** eliminada por inactividad automática.`).setColor('Red')] 
-            }).catch(()=>{});
-        }
-
+        if (logChannel) logChannel.send({ embeds: [new EmbedBuilder().setDescription(`💀 **${tName}** eliminada por inactividad.`).setColor('Red')] }).catch(()=>{});
         delete tribes[tName];
         modified = true;
     }
