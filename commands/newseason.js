@@ -47,7 +47,7 @@ module.exports = {
 
             // 3. RECREAR CATEGORÍAS
             const newPrivateCat = await guild.channels.create({
-                name: '🔐 Rᴇgistry-Pʀiᴠᴀdᴏ',
+                name: '🔐 Rᴇɢɪsᴛʀᴏ-Pʀɪᴠᴀᴅᴏ', // CORRECCIÓN: 'Rᴇgistrᴏ' en lugar de 'Rᴇgistrᴏ'
                 type: ChannelType.GuildCategory,
                 position: 0,
                 permissionOverwrites: [{ id: guild.id, deny: [PermissionFlagsBits.ViewChannel] }]
@@ -63,13 +63,13 @@ module.exports = {
             config.categories.tribes = newTribesCat.id; 
             
             // 4. RECREACIÓN ROBUSTA DEL CANAL DE LÍDERES (ARREGLO DEL BUG DE NOMBRE)
-            const leaderGlobalRole = guild.roles.cache.get(config.roles.leader);
-            // Aseguramos el nombre, usando un valor por defecto si no está en la config
-            const LEADER_CHAN_NAME = config.channels.leader_channel || '👑・Sᴀʟᴀ-ᴅᴇ-Lɪᴅᴇʀᴇs'; 
-            
-            if (leaderGlobalRole) {
-                 // RECREAR el canal con el nombre correcto y el nuevo Parent ID
-                 const leaderChan = await guild.channels.create({
+            const leaderGlobalRole = guild.roles.cache.get(config.roles.leader);
+            // CORRECCIÓN: Forzamos el nombre deseado.
+            const LEADER_CHAN_NAME = '👑・sᴀʟᴀ-ᴅᴇ-lɪᴅᴇʀᴇs'; 
+            
+            if (leaderGlobalRole) {
+                // RECREAR el canal con el nombre correcto y el nuevo Parent ID
+                const leaderChan = await guild.channels.create({
                     name: LEADER_CHAN_NAME,
                     type: ChannelType.GuildText,
                     parent: config.categories.tribes, // Usar el ID de la nueva categoría

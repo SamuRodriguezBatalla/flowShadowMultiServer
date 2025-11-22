@@ -61,7 +61,7 @@ module.exports = {
 
                 // 3. RECREAR CATEGORÍAS NUEVAS
                 const newPrivateCat = await guild.channels.create({
-                    name: '🔐 Rᴇgistrᴏ-Pʀiᴠᴀdᴏ',
+                    name: '🔐 Rᴇɢɪsᴛʀᴏ-Pʀɪᴠᴀᴅᴏ', // CORRECCIÓN: 'Rᴇgistrᴏ' en lugar de 'Rᴇgistrᴏ'
                     type: ChannelType.GuildCategory,
                     position: 0,
                     permissionOverwrites: [{ id: guild.id, deny: [PermissionFlagsBits.ViewChannel] }]
@@ -76,10 +76,11 @@ module.exports = {
                 config.categories.tribes = newTribesCat.id;
                 
                 // 4. REUBICAR/RECREAR CANAL DE LÍDERES
-                let leaderGlobalRole = guild.roles.cache.get(config.roles.leader);
-                
-                if (leaderGlobalRole) {
-                    const LEADER_CHAN_NAME = config.channels.leader_channel || '👑・Sᴀʟᴀ-ᴅᴇ-Lɪᴅᴇʀᴇs'; 
+                let leaderGlobalRole = guild.roles.cache.get(config.roles.leader);
+                
+                if (leaderGlobalRole) {
+                    // CORRECCIÓN: Forzamos el nombre deseado.
+                    const LEADER_CHAN_NAME = '👑・sᴀʟᴀ-ᴅᴇ-lɪᴅᴇʀᴇs';
                     
                     const leaderChan = await guild.channels.create({
                         name: LEADER_CHAN_NAME,

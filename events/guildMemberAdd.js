@@ -99,7 +99,7 @@ async function iniciarRegistro(member) {
 
         // 5. MENSAJE DE BIENVENIDA Y FLUJO
         const season = config.season || 0;
-        await channel.send(`👋 Hola ${member}. Bienvenido a la **Season ${season}**.\nEscribe tu **ID de PlayStation** para comenzar.`);
+        await channel.send(`👋 Hola ${member}. Bienvenido a la **Season ${season} de ${guild.name}**.\nEscribe tu **ID de PlayStation** para comenzar.`);
 
         const idMsg = await recibirRespuesta(member, channel);
         if (!idMsg) return; 
