@@ -3,7 +3,7 @@ const { resetServerData, loadGuildConfig, saveGuildConfig } = require('../utils/
 const { updateLog } = require('../utils/logger');
 const { sincronizarRegistros } = require('../utils/syncManager');
 
-// Helper para borrar canales de una categoría (NUEVO)
+// Helper para borrar canales de una categoría
 async function deleteChannelsInCategory(guild, categoryId) {
     if (!categoryId) return;
     const category = guild.channels.cache.get(categoryId);
@@ -50,7 +50,7 @@ module.exports = {
                 const guild = interaction.guild;
                 let config = loadGuildConfig(guild.id) || { roles: {}, channels: {}, categories: {} };
                 
-                // 1. ELIMINAR CATEGORÍAS Y SU CONTENIDO PRIMERO (CORRECCIÓN)
+                // 1. ELIMINAR CATEGORÍAS Y SU CONTENIDO
                 await deleteChannelsInCategory(guild, config.categories.private_registration);
                 await deleteChannelsInCategory(guild, config.categories.tribes);
                 
@@ -59,9 +59,9 @@ module.exports = {
                 config = loadGuildConfig(guild.id) || { roles: {}, channels: {}, categories: {} }; 
                 config.season = 0;
 
-                // 3. RECREAR CATEGORÍAS NUEVAS
+                // 3. RECREAR CATEGORÍAS
                 const newPrivateCat = await guild.channels.create({
-                    name: '🔐 Rᴇɢɪsᴛʀᴏ-Pʀɪᴠᴀᴅᴏ', // CORRECCIÓN: 'Rᴇgistrᴏ' en lugar de 'Rᴇgistrᴏ'
+                    name: '🔐 Rᴇɢɪsᴛʀᴏ-Pʀɪᴠᴀᴅᴏ',
                     type: ChannelType.GuildCategory,
                     position: 0,
                     permissionOverwrites: [{ id: guild.id, deny: [PermissionFlagsBits.ViewChannel] }]
@@ -75,12 +75,11 @@ module.exports = {
                 });
                 config.categories.tribes = newTribesCat.id;
                 
-                // 4. REUBICAR/RECREAR CANAL DE LÍDERES
-                let leaderGlobalRole = guild.roles.cache.get(config.roles.leader);
-                
-                if (leaderGlobalRole) {
-                    // CORRECCIÓN: Forzamos el nombre deseado.
-                    const LEADER_CHAN_NAME = '👑・sᴀʟᴀ-ᴅᴇ-lɪᴅᴇʀᴇs';
+                // 4. RECREAR CANAL DE LÍDERES (CON NOMBRE CORRECTO)
+                let leaderGlobalRole = guild.roles.cache.get(config.roles.leader);
+                
+                if (leaderGlobalRole) {
+                    const LEADER_CHAN_NAME = '👑・sᴀʟᴀ-ᴅᴇ-lɪᴅᴇʀᴇs'; 
                     
                     const leaderChan = await guild.channels.create({
                         name: LEADER_CHAN_NAME,
@@ -98,8 +97,17 @@ module.exports = {
                 saveGuildConfig(guild.id, config);
                 await updateLog(guild, interaction.client);
 
-                // 5. BORRAR ROLES ANTIGUOS (No protegidos)
-                const safeIDs = [config.roles.unverified, config.roles.survivor, config.roles.leader, guild.id, ...(config.roles.protected || [])];
+                // 5. BORRAR ROLES (EXCEPTO ADMINS/STAFF)
+                const safeIDs = [
+                    config.roles.unverified, 
+                    config.roles.survivor, 
+                    config.roles.leader, 
+                    config.roles.admin, // Protegemos Admin
+                    config.roles.staff, // Protegemos Staff
+                    guild.id, 
+                    ...(config.roles.protected || [])
+                ];
+                
                 const roles = await guild.roles.fetch();
                 for (const r of roles.values()) {
                     if (!safeIDs.includes(r.id) && !r.managed && !r.permissions.has('Administrator')) {
@@ -107,25 +115,34 @@ module.exports = {
                     }
                 }
 
-                // 6. RESETEO DE ROLES DE MIEMBROS (CORRECCIÓN GuildMembersTimeout)
+                // 6. RESETEAR MIEMBROS (PROTEGIENDO ADMINS)
                 const unverifiedRole = guild.roles.cache.get(config.roles.unverified);
                 
                 let membersToProcess = guild.members.cache; 
                 try {
-                    // Intentamos un fetch completo, pero con un timeout de 30s
                     const fetchedMembers = await guild.members.fetch({ time: 30000, force: true });
                     membersToProcess = fetchedMembers; 
-                    console.log(`✅ Fetched ${membersToProcess.size} members for Full Wipe.`);
                 } catch (e) {
-                    console.warn(`⚠️ GuildMembersTimeout durante fetch en Full Wipe. Usando ${membersToProcess.size} miembros de caché.`);
+                    console.warn(`⚠️ GuildMembersTimeout. Usando caché.`);
                 }
                 
                 if (unverifiedRole) {
                     for (const m of membersToProcess.values()) {
-                        if (!m.user.bot && !m.permissions.has('Administrator')) {
-                            await m.roles.set([unverifiedRole.id]).catch(e => console.error(`Error reseteando rol a ${m.user.tag}: ${e.message}`));
-                            await new Promise(r => setTimeout(r, 100));
+                        if (m.user.bot) continue;
+
+                        // --- FILTRO DE PROTECCIÓN ---
+                        // Si es Owner, tiene permisos de Admin, o tiene el rol de Admin/Staff configurado -> NO TOCAR
+                        if (m.id === guild.ownerId || 
+                            m.permissions.has(PermissionFlagsBits.Administrator) ||
+                            (config.roles.admin && m.roles.cache.has(config.roles.admin)) ||
+                            (config.roles.staff && m.roles.cache.has(config.roles.staff))
+                        ) {
+                            continue; // Saltar a este usuario
                         }
+                        // -----------------------------
+
+                        await m.roles.set([unverifiedRole.id]).catch(e => console.error(`Error reseteando rol a ${m.user.tag}: ${e.message}`));
+                        await new Promise(r => setTimeout(r, 100));
                     }
                 }
 

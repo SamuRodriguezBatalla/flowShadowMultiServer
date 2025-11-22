@@ -1,10 +1,11 @@
-const { Events, MessageFlags, EmbedBuilder, ChannelType } = require('discord.js');
+const { Events, MessageFlags, EmbedBuilder, ChannelType, PermissionFlagsBits } = require('discord.js');
 const { loadGuildConfig, loadTribes, saveTribes, isPremium } = require('../utils/dataManager');
 const { iniciarRegistro } = require('./guildMemberAdd'); 
 
 module.exports = {
     name: Events.MessageCreate,
     async execute(message) {
+        // 0. Validaciones básicas
         if (message.author.bot || !message.guild) return;
         if (!isPremium(message.guild.id)) return;
 
@@ -20,11 +21,27 @@ module.exports = {
         const leaderRole = config.roles.leader ? guild.roles.cache.get(config.roles.leader) : null;
 
         // ==================================================================
+        // 🛡️ ESCUDO DE INMUNIDAD (PROTECCIÓN PARA ADMINS)
+        // ==================================================================
+        // Definimos quién es inmune a las restricciones y reseteos:
+        // 1. Dueño del Servidor
+        // 2. Tiene permisos de Administrador de Discord
+        // 3. Tiene el rol de Admin configurado en el bot
+        // 4. Tiene el rol de Staff configurado en el bot
+        const isImmune = 
+            member.id === guild.ownerId ||
+            member.permissions.has(PermissionFlagsBits.Administrator) ||
+            (config.roles.admin && member.roles.cache.has(config.roles.admin)) ||
+            (config.roles.staff && member.roles.cache.has(config.roles.staff));
+
+
+        // ==================================================================
         // 1. AUTO-ASIGNACIÓN AL HABLAR (LÓGICA INTELIGENTE)
         // ==================================================================
         // Si el usuario NO tiene ninguno de los roles del sistema, se le considera "nuevo".
-        // Ignoramos roles de Nitro, bots, juegos, etc.
+        // CORRECCIÓN: Si es Inmune, cuenta como que TIENE roles de sistema.
         const hasSystemRole = 
+            isImmune || // <-- EL ARREGLO: Si es admin, el bot asume que está "registrado/seguro"
             (unverifiedRole && member.roles.cache.has(unverifiedRole.id)) ||
             (survivorRole && member.roles.cache.has(survivorRole.id)) ||
             (leaderRole && member.roles.cache.has(leaderRole.id));
@@ -40,7 +57,11 @@ module.exports = {
         // 2. PORTERO (Bloqueo de No Verificados)
         // ==================================================================
         if (unverifiedRole && member.roles.cache.has(unverifiedRole.id)) {
-            // Lista Blanca
+            
+            // CORRECCIÓN: Si es Admin/Inmune, le dejamos hablar aunque tenga el rol de No Verificado (útil para pruebas)
+            if (isImmune) return; 
+
+            // Lista Blanca (Canales donde sí pueden hablar)
             if (message.channel.name.startsWith('registro-')) return; 
             if (message.channel.topic && message.channel.topic.includes('SYSTEM:REGISTRO')) return;
             if (config.categories.private_registration && message.channel.parentId === config.categories.private_registration) return;
@@ -66,13 +87,14 @@ module.exports = {
         }
 
         // ==================================================================
-        // 3. CHECK-IN PASIVO
+        // 3. CHECK-IN PASIVO (ACTIVIDAD DE TRIBUS)
         // ==================================================================
         let tribes = loadTribes(guild.id);
         let modified = false;
         for (const tName in tribes) {
             const tribe = tribes[tName];
             if (tribe.members.some(m => m.discordId === message.author.id)) {
+                // Actualizar actividad si ha pasado más de 1 hora desde la última vez
                 if (Date.now() - (tribe.lastActive || 0) > 3600000) {
                     tribe.lastActive = Date.now();
                     modified = true;
