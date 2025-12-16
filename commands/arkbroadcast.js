@@ -1,24 +1,26 @@
-const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
-const { sendRconCommand } = require('../utils/rconManager');
+const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
+const { sendGlobalCommand } = require('../utils/serverManager'); // <--- CAMBIO
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('arkbroadcast')
-        .setDescription('📢 Envía un mensaje global a todos los jugadores en Ark.')
-        .addStringOption(o => o.setName('mensaje').setDescription('El texto a mostrar en pantalla').setRequired(true))
+        .setDescription('📢 Envía un mensaje global a TODOS los servidores (PC/Consola).')
+        .addStringOption(o => o.setName('mensaje').setDescription('Texto a mostrar en pantalla').setRequired(true))
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
     async execute(interaction) {
         await interaction.deferReply();
         const msg = interaction.options.getString('mensaje');
 
-        // El comando de Ark es "Broadcast <mensaje>"
-        const result = await sendRconCommand(interaction.guild.id, `Broadcast ${msg}`);
+        // Broadcast funciona igual en RCON y Nitrado API Console
+        const result = await sendGlobalCommand(interaction.guild.id, `Broadcast ${msg}`);
 
-        if (result.success) {
-            await interaction.editReply(`📢 **Mensaje enviado al servidor:**\n"${msg}"`);
-        } else {
-            await interaction.editReply(`❌ **Error:** ${result.message}`);
-        }
+        const embed = new EmbedBuilder()
+            .setTitle('📢 Broadcast Global Enviado')
+            .setColor('Blue')
+            .setDescription(`**Mensaje:** "${msg}"\n\n**Informe de entrega:**\n${result.message}`)
+            .setTimestamp();
+
+        await interaction.editReply({ embeds: [embed] });
     },
 };

@@ -1,6 +1,6 @@
-const { getArkServers, getNitradoServers, getNitradoConfig } = require('./dataManager');
-const { sendRconCommand } = require('./rconManager'); // Tu gestor RCON actual
-const { sendNitradoCommand } = require('./nitradoManager'); // El gestor API que creamos antes
+const { getArkServers, getNitradoServers } = require('./dataManager');
+const { sendRconCommand } = require('./rconManager');
+const { sendNitradoCommand, getNitradoPlayers } = require('./nitradoManager');
 
 /**
  * Obtiene una lista unificada de TODOS los servidores (RCON + Nitrado)
@@ -18,30 +18,23 @@ async function sendGlobalCommand(guildId, command, targetName = null) {
     const allServers = getAllServers(guildId);
     if (allServers.length === 0) return { success: false, message: 'No hay servidores configurados.' };
 
-    // Filtrar si se especificó un nombre
     const targets = targetName 
-        ? allServers.filter(s => s.server_name === targetName || s.name === targetName)
+        ? allServers.filter(s => (s.server_name === targetName || s.name === targetName))
         : allServers;
 
     if (targets.length === 0) return { success: false, message: `Servidor "${targetName}" no encontrado.` };
 
     const results = [];
 
-    // Ejecutar en paralelo
     await Promise.all(targets.map(async (server) => {
         let res;
         try {
             if (server.type === 'RCON') {
-                // Usar tu función existente de RCON
-                // Nota: sendRconCommand espera un ID, aquí lo llamamos directo
                 res = await sendRconCommand(guildId, command, server.name); 
-                // Tu sendRconCommand ya devuelve { server: name, success: ... }
-                // pero como lo estamos llamando 1 a 1, adaptamos:
                 if(res.rawResults && res.rawResults[0]) res = res.rawResults[0];
             } 
             else if (server.type === 'NITRADO') {
-                // Usar la función de Nitrado
-                const nitradoRes = await sendNitradoCommand(guildId, command, server.service_id);
+                const nitradoRes = await sendNitradoCommand(guildId, command); // Ajuste: sendNitradoCommand usa el service_id internamente si solo hay uno, o puedes pasar server.service_id si lo modificas
                 res = { 
                     server: server.server_name, 
                     success: nitradoRes.success, 
@@ -54,9 +47,67 @@ async function sendGlobalCommand(guildId, command, targetName = null) {
         results.push(res);
     }));
 
-    // Formatear respuesta combinada
-    const output = results.map(r => `**[${r.server}]**: ${r.success ? '✅ ' + (r.response || 'Ok') : '❌ ' + (r.message || 'Error')}`).join('\n');
+    const output = results.map(r => `**[${r.server || 'Server'}]:** ${r.success ? '✅ ' + (r.response || 'Ok') : '❌ ' + (r.message || 'Error')}`).join('\n');
     return { success: true, message: output };
 }
 
-module.exports = { getAllServers, sendGlobalCommand };
+/**
+ * NUEVA FUNCIÓN: Obtiene estado y jugadores de TODOS los servidores unificados.
+ * Devuelve un array de objetos estandarizados.
+ */
+async function getGlobalStatus(guildId) {
+    const allServers = getAllServers(guildId);
+    const combinedData = [];
+
+    await Promise.all(allServers.map(async (server) => {
+        const serverName = server.name || server.server_name;
+        let data = {
+            name: serverName,
+            type: server.type,
+            online: false,
+            playerCount: 0,
+            playerList: [] // Array de strings "Nombre (ID)"
+        };
+
+        try {
+            if (server.type === 'RCON') {
+                const res = await sendRconCommand(guildId, 'ListPlayers', serverName);
+                if (res.success && res.rawResults && res.rawResults[0]) {
+                    data.online = true;
+                    const responseText = res.rawResults[0].response || "";
+                    
+                    if (responseText.includes("No Players Connected")) {
+                        data.playerCount = 0;
+                    } else {
+                        const lines = responseText.split('\n').filter(l => l.includes(','));
+                        data.playerCount = lines.length;
+                        data.playerList = lines.map(line => {
+                            // Ark RCON: "0. Nombre, ID"
+                            const parts = line.split(',');
+                            return parts[0].split('.')[1]?.trim() || parts[0].trim();
+                        });
+                    }
+                }
+            } 
+            else if (server.type === 'NITRADO') {
+                const res = await getNitradoPlayers(guildId);
+                if (res.success) {
+                    data.online = res.status === 'started';
+                    data.playerCount = res.players || 0; // Nitrado devuelve número
+                    // Nitrado a veces devuelve array de objetos players, a veces null si está privado
+                    if (res.playerList && Array.isArray(res.playerList)) {
+                        data.playerList = res.playerList.map(p => p.name);
+                    }
+                }
+            }
+        } catch (e) {
+            console.error(`Error status ${serverName}:`, e.message);
+        }
+        
+        combinedData.push(data);
+    }));
+
+    return combinedData;
+}
+
+module.exports = { getAllServers, sendGlobalCommand, getGlobalStatus };

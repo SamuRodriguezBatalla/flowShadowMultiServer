@@ -1,12 +1,12 @@
 const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
-const { sendRconCommand } = require('../utils/rconManager');
+const { sendGlobalCommand } = require('../utils/serverManager'); // <--- CAMBIO
 const { logAdminAction } = require('../utils/adminLogger');
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('kick')
-        .setDescription('👢 Expulsa a un jugador del servidor (RCON).')
-        .addStringOption(o => o.setName('id_ark').setDescription('ID de Ark (SteamID/EOS)').setRequired(true))
+        .setDescription('👢 Expulsa a un jugador del servidor (PC/Consola).')
+        .addStringOption(o => o.setName('id_ark').setDescription('ID de Ark (SteamID/EOS/PSN)').setRequired(true))
         .addStringOption(o => o.setName('razon').setDescription('Motivo').setRequired(true))
         .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers),
 
@@ -15,13 +15,17 @@ module.exports = {
         const arkId = interaction.options.getString('id_ark');
         const reason = interaction.options.getString('razon');
 
-        const result = await sendRconCommand(interaction.guild.id, `KickPlayer "${arkId}"`);
+        // Enviamos el kick a TODOS los servidores del cluster porque no sabemos dónde está
+        // sendGlobalCommand se encarga de enviarlo por RCON o API según corresponda
+        const result = await sendGlobalCommand(interaction.guild.id, `KickPlayer "${arkId}"`);
 
+        // Analizamos el resultado
+        // Si al menos un servidor responde con éxito o confirma el comando
         if (result.success) {
-            await interaction.editReply(`👢 **Jugador expulsado.**\nID: ${arkId}\nRazón: ${reason}`);
+            await interaction.editReply(`👢 **Comando de expulsión enviado.**\nID: ${arkId}\nRazón: ${reason}\n\n**Resultados por servidor:**\n${result.message}`);
             await logAdminAction(interaction.guild, interaction.user, 'kick', `ID: ${arkId}\nRazón: ${reason}`);
         } else {
-            await interaction.editReply(`❌ Error RCON: ${result.message}`);
+            await interaction.editReply(`❌ **Error General:** ${result.message}`);
         }
     },
 };
