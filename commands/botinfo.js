@@ -1,53 +1,61 @@
-const { SlashCommandBuilder, EmbedBuilder, version: djsversion } = require('discord.js');
-const botVersion = '3.5.0 (Ark Manager Ultimate)'; 
+const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const botVersion = '3.6.0 (Cross-Platform Edition)'; 
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('botinfo')
-        .setDescription('🤖 Muestra la lista completa de funciones y estado del bot.'),
+        .setDescription('🤖 Muestra la lista de comandos disponibles para usuarios y admins.'),
 
     async execute(interaction) {
         const sent = await interaction.reply({ content: 'Cargando información...', fetchReply: true });
         const ping = sent.createdTimestamp - interaction.createdTimestamp;
 
         const embed = new EmbedBuilder()
-            .setColor('#00BFFF') // Deep Sky Blue
-            .setTitle(`🤖 Panel de Control de ${interaction.client.user.username}`)
-            .setDescription('Sistema integral para la gestión de servidores de Ark: Survival Evolved/Ascended.\nAutomatización de roles, tribus, sanciones y economía.')
+            .setColor('#00BFFF')
+            .setTitle(`🤖 Ayuda de ${interaction.client.user.username}`)
+            .setDescription('Sistema de gestión para Ark: Survival Ascended/Evolved.\nSoporta PC (RCON) y Consolas (Nitrado API).')
             .setThumbnail(interaction.client.user.displayAvatarURL())
             .addFields(
                 { 
-                    name: '📊 Estado del Sistema', 
-                    value: `**Ping:** ${ping}ms\n**Servidores:** ${interaction.client.guilds.cache.size}\n**Versión:** ${botVersion}`, 
-                    inline: false 
+                    name: '💻 Conexión de Servidores (Admins)', 
+                    value: 
+                    '`/setupark` - Conexión RCON potente (**Solo PC/Steam**).\n' +
+                    '`/setupnitrado` - Conexión API (**Para Consolas PS5/Xbox**).\n' +
+                    '`/setupstatus` - Crea un panel de estado auto-actualizable.\n' +
+                    '`/unlinkark` - Desvincula el servidor actual.'
                 },
                 {
-                    name: '🦖 Supervivencia & Tribus',
-                    value: '`/tribu` - Gestión completa (Info, Check-in, Reclutar, Votar...)\n`/infoplayer` - Ficha personal (ID, Warns, Kit)\n`/kit` - Estado de entrega de starter kits',
-                    inline: false
+                    name: '🦖 Gestión de Tribus',
+                    value: 
+                    '`/tribu` - Menú principal (Info, Check-in, Reclutar, Votar...).\n' +
+                    '`/infoplayer` - Ficha personal (ID, Warns, Kit).\n' +
+                    '`/kit` - Marcar entrega de starter kits (Admins).\n' +
+                    '`/coords` - Guardar coordenadas de bases o farmeo.'
                 },
                 {
-                    name: '⚔️ Diplomacia & Comercio',
-                    value: '`/diplomacia` - Alianzas, Declarar Guerra y **Alertas de Raid**\n`/mercado` - Publicar ofertas de compra/venta',
-                    inline: false
+                    name: '⚔️ Diplomacia & Economía',
+                    value: 
+                    '`/diplomacia` - Gestionar Alianzas y Guerras.\n' +
+                    '`/mercado` - Publicar compra/venta de objetos.'
                 },
                 {
-                    name: '🛡️ Moderación & Seguridad',
-                    value: '`/warn` / `/unwarn` - Sistema de advertencias (Ban temporal por acumulación)\n`/permaban` / `/unpermaban` - **Lista Negra** persistente tras Wipes\n`/mute` / `/unmute` - Aislamiento temporal (Timeout)\n`/banlist` - Ver lista de vetados permanentes',
-                    inline: false
+                    name: '🛡️ Moderación',
+                    value: 
+                    '`/warn` / `/unwarn` - Sistema de advertencias.\n' +
+                    '`/permaban` - Ban permanente (Lista Negra).\n' +
+                    '`/arkban` - Ban dentro del juego (Requiere RCON/PC).\n' +
+                    '`/mute` - Silenciar usuario o tribu entera.'
                 },
                 {
-                    name: '⚙️ Administración del Servidor',
-                    value: '`/setup` - Instalación inicial\n`/adminconfig` - Límites de miembros y alianzas\n`/newseason` - Reinicio de temporada (Amnistía de Warns)\n`/fullwipe` - Borrado total (Season 0)\n`/historycheck` - Consultar logs de seasons pasadas',
-                    inline: false
-                },
-                {
-                    name: '🔗 Enlaces de Interés',
-                    value: '[Soporte Oficial](https://discord.gg/pBPRS64GKq)',
-                    inline: false
+                    name: '⚙️ Configuración Admin',
+                    value: 
+                    '`/setup` - Instalación de canales y roles.\n' +
+                    '`/adminconfig` - Límites de tribu y alianzas.\n' +
+                    '`/newseason` - Reinicio de temporada.\n' +
+                    '`/fixroles` - Arreglar permisos de usuarios.'
                 }
             )
-            .setFooter({ text: `Solicitado por ${interaction.user.tag}`, iconURL: interaction.user.displayAvatarURL() })
+            .setFooter({ text: `Versión ${botVersion} • FlowShadow` })
             .setTimestamp();
 
         await interaction.editReply({ content: null, embeds: [embed] });

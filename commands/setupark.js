@@ -4,8 +4,7 @@ const { addArkServer, getArkServers, removeArkServer } = require('../utils/dataM
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('setupark')
-        .setDescription('⚙️ Gestión de Servidores Ark (Cluster).')
-        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .setDescription('💻 (SOLO PC) Vincula servidor mediante IP/Puerto RCON.') // <--- CAMBIO AQUÍ        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         .addSubcommand(s => s.setName('add').setDescription('Añadir un mapa al cluster.')
             .addStringOption(o => o.setName('nombre').setDescription('Nombre (Ej: Island)').setRequired(true))
             .addStringOption(o => o.setName('ip').setDescription('IP').setRequired(true))

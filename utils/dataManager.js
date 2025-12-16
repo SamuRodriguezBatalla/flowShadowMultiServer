@@ -36,6 +36,22 @@ db.exec(`
         port INTEGER,
         password_enc TEXT
     );
+
+    -- NITRADO
+    CREATE TABLE IF NOT EXISTS nitrado_servers (
+        guild_id TEXT,
+        server_name TEXT,
+        service_id TEXT,
+        PRIMARY KEY (guild_id, service_id)
+    );
+
+    -- NITRADO API KEYS
+    CREATE TABLE IF NOT EXISTS nitrado_configs (
+        guild_id TEXT PRIMARY KEY,
+        token TEXT,
+        service_id TEXT,
+        username TEXT
+    );
 `);
 
 // --- CONFIGURACIÓN & TRIBUS ---
@@ -114,6 +130,38 @@ function deleteStatusPanel(guildId) {
     db.prepare('DELETE FROM status_panels WHERE guild_id = ?').run(guildId);
 }
 
+function saveNitradoConfig(guildId, token, serviceId, username) {
+    // Encriptamos el token por seguridad (usando tu utils/crypto.js)
+    const encToken = encrypt(token); 
+    db.prepare('INSERT OR REPLACE INTO nitrado_configs (guild_id, token, service_id, username) VALUES (?, ?, ?, ?)').run(guildId, encToken, serviceId, username);
+}
+
+function getNitradoConfig(guildId) {
+    const row = db.prepare('SELECT * FROM nitrado_configs WHERE guild_id = ?').get(guildId);
+    if (!row) return null;
+    return { 
+        token: decrypt(row.token), // Desencriptamos al leer
+        serviceId: row.service_id,
+        username: row.username
+    };
+}
+
+function deleteNitradoConfig(guildId) {
+    db.prepare('DELETE FROM nitrado_configs WHERE guild_id = ?').run(guildId);
+}
+
+function addNitradoServer(guildId, name, serviceId) {
+    db.prepare('INSERT OR REPLACE INTO nitrado_servers (guild_id, server_name, service_id) VALUES (?, ?, ?)').run(guildId, name, String(serviceId));
+}
+
+function getNitradoServers(guildId) {
+    return db.prepare('SELECT * FROM nitrado_servers WHERE guild_id = ?').all(guildId);
+}
+
+function removeNitradoServer(guildId, name) {
+    db.prepare('DELETE FROM nitrado_servers WHERE guild_id = ? AND server_name = ?').run(guildId, name);
+}
+
 module.exports = { 
     loadGuildConfig, saveGuildConfig, loadTribes, saveTribes, archiveSeason, loadSeasonHistory, resetServerData,
     addPremium, removePremium, isPremium, setUnlimited, getAllPremiumGuilds, updateLastAlert,
@@ -122,5 +170,7 @@ module.exports = {
     addGameBan, removeGameBan, getGameBans, getExpiredGameBans,
     initRegistrationState, getRegistrationState, updateRegistrationState, deleteRegistrationState,
     saveTribe,
-    deleteTribe,saveStatusPanel, getStatusPanel, deleteStatusPanel
+    deleteTribe,saveStatusPanel, getStatusPanel, deleteStatusPanel,
+    saveNitradoConfig, getNitradoConfig, deleteNitradoConfig,
+    addNitradoServer, getNitradoServers, removeNitradoServer
 };
