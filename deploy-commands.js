@@ -7,21 +7,22 @@ const commands = [];
 const commandsPath = path.join(__dirname, "commands");
 const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith(".js"));
 
-// Opciones vacías para checkout global
-const seasonChoices = []; 
+console.log(`📦 Cargando ${commandFiles.length} comandos...`);
 
 for (const file of commandFiles) {
     const filePath = path.join(commandsPath, file);
-    const command = require(filePath);
+    try {
+        const command = require(filePath);
 
-    if ("data" in command && "execute" in command) {
-        let commandData;
-        if (typeof command.createData === 'function') {
-            commandData = command.createData(seasonChoices);
+        // Verificación estricta
+        if (command && command.data && typeof command.data.toJSON === 'function') {
+            commands.push(command.data.toJSON());
+            // console.log(`✅ Cargado: ${command.data.name}`);
         } else {
-            commandData = command.data;
+            console.warn(`⚠️ El comando ${file} no tiene una propiedad "data" válida o le falta "toJSON()". Se ha omitido.`);
         }
-        commands.push(commandData.toJSON());
+    } catch (error) {
+        console.error(`❌ Error crítico cargando el archivo ${file}:`, error);
     }
 }
 
@@ -29,16 +30,16 @@ const rest = new REST({ version: "10" }).setToken(process.env.BOT_TOKEN);
 
 (async () => {
     try {
-        console.log(`🔄 Registrando ${commands.length} comandos GLOBALMENTE...`);
-        
-        // Registro global (sin GUILD_ID)
-        await rest.put(
+        console.log(`🔄 Iniciando actualización de ${commands.length} comandos (Globales)...`);
+
+        const data = await rest.put(
             Routes.applicationCommands(process.env.CLIENT_ID),
-            { body: commands }
+            { body: commands },
         );
 
-        console.log("✅ Comandos registrados. Pueden tardar 1h en aparecer en todos los servidores.");
+        console.log(`✅ ¡Éxito! Se han registrado ${data.length} comandos.`);
     } catch (error) {
-        console.error("❌ Error:", error);
+        console.error("❌ Error fatal al registrar comandos en la API de Discord:");
+        console.error(error);
     }
 })();

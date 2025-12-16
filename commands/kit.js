@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
-const { loadTribes, saveTribes } = require('../utils/dataManager'); // <--- NUEVO
+const { loadTribes, saveTribes, saveTribe } = require('../utils/dataManager');
 const { updateLog } = require('../utils/logger');
+const { updateTribePanel } = require('../utils/tribePanel'); // <--- IMPORTANTE
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -31,8 +32,11 @@ module.exports = {
 
         if (!found) return interaction.reply({ content: `❌ ${targetUser} no tiene tribu.`, flags: MessageFlags.Ephemeral });
 
-        saveTribes(guildId, tribes);
-        await updateLog(interaction.guild, interaction.client);
+        saveTribe(guildId, tribeFound, tribes[tribeFound]);
+        
+        // ACTUALIZAR PANELES
+        await updateLog(interaction.guild, interaction.client); // Log Público
+        await updateTribePanel(interaction.guild, tribeFound);  // Panel Privado
 
         return interaction.reply(`📦 **Kit Actualizado:** ${targetUser} (${tribeFound}) -> ${isDelivered ? '✅ Entregado' : '❌ Pendiente'}`);
     },

@@ -17,11 +17,12 @@ function generateTribeHelpEmbed() {
                 '`/tribu info` - Muestra la ficha de la tribu, miembros y estado.\n' +
                 '`/tribu votar` - Inicia o participa en una votación de liderazgo.\n' +
                 '`/tribu checkin` - 🕒 **Importante:** Renueva la actividad de la base para evitar el borrado.\n' +
-                '`/infoplayer [usuario]` - Muestra la ficha (ID, Warns, Kit) de un jugador o la tuya propia.'
+                '`/infoplayer [usuario]` - Muestra la ficha (ID, Warns, Kit) de un jugador.'
             },
             { 
                 name: '👑 Solo para Líderes', 
                 value: 
+                '`/tribu reclutar @Usuario` - Invita a un jugador sin tribu a unirse a la tuya.\n' +
                 '`/tribu ascender @Usuario` - Traspasa el liderazgo a otro miembro.\n' +
                 '`/tribu kick @Usuario` - Expulsa a un miembro de la tribu.\n' +
                 '`/tribu rename "Nombre"` - Cambia el nombre de la tribu.'

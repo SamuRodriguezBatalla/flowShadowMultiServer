@@ -1,8 +1,9 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { getAllPremiumGuilds } = require('../utils/dataManager');
+require('dotenv').config();
 
-// 🔒 TU ID REAL (Asegúrate de que sea la tuya)
-const OWNER_ID = '749826568477474888'; 
+// 🔒 TU ID REAL
+const OWNER_ID = process.env.OWNER_ID; 
 
 module.exports = {
     data: new SlashCommandBuilder()

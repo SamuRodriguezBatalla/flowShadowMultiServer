@@ -1,7 +1,8 @@
-const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags, StringSelectMenuBuilder, ActionRowBuilder, EmbedBuilder } = require('discord.js');
-const { loadTribes, saveTribes, loadGuildConfig } = require('../utils/dataManager');
+const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags, StringSelectMenuBuilder, ActionRowBuilder, EmbedBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
+const { loadTribes, saveTribes, saveTribe, loadGuildConfig } = require('../utils/dataManager');
 const { updateLog } = require('../utils/logger');
 const { generateTribeHelpEmbed } = require('../utils/helpGenerator');
+const { updateTribePanel } = require('../utils/tribePanel'); // <--- NUEVO IMPORT
 
 // Función auxiliar para generar el embed de votación
 function generateVoteEmbed(tribeData, tribeName, interactionClient) {
@@ -50,10 +51,11 @@ const createData = () => {
         .addSubcommand(s => s.setName('info').setDescription('Información de tu tribu.'))
         .addSubcommand(s => s.setName('checkin').setDescription('🕒 Renueva actividad para evitar borrado.'))
         .addSubcommand(s => s.setName('votar').setDescription('Inicia votación de líder.'))
+        .addSubcommand(s => s.setName('reclutar').setDescription('Invita a un jugador a tu tribu.').addUserOption(o => o.setName('usuario').setDescription('Usuario a invitar').setRequired(true)))
         .addSubcommand(s => s.setName('ascender').setDescription('Traspasa liderazgo.').addUserOption(o => o.setName('usuario').setDescription('Usuario').setRequired(true)))
         .addSubcommand(s => s.setName('kick').setDescription('Expulsa miembro.').addUserOption(o => o.setName('usuario').setDescription('Usuario').setRequired(true)))
         .addSubcommand(s => s.setName('rename').setDescription('Cambia nombre tribu.').addStringOption(o => o.setName('nuevo_nombre').setDescription('Nuevo nombre').setRequired(true)))
-        .addSubcommand(s => s.setName('updatehelp').setDescription('ADMIN: Actualiza guía en canales.'));
+        .addSubcommand(s => s.setName('updatehelp').setDescription('ADMIN: Actualiza paneles en canales.'));
 };
 
 module.exports = {
@@ -67,7 +69,7 @@ module.exports = {
         
         if (!config) return interaction.reply({ content: '❌ Bot no configurado.', flags: MessageFlags.Ephemeral });
 
-        const tribes = loadTribes(guildId);
+        let tribes = loadTribes(guildId);
         const subcommand = interaction.options.getSubcommand();
         const executorId = interaction.user.id;
         const isServerAdmin = interaction.member.permissions.has(PermissionFlagsBits.Administrator);
@@ -82,35 +84,30 @@ module.exports = {
             }
         }
 
-        // --- LÓGICA CHECK-IN CON LIMPIEZA ---
+        // --- COMANDO CHECKIN ---
         if (subcommand === 'checkin') {
             if (!myTribeData) return interaction.reply({ content: '❌ No tienes tribu.', flags: MessageFlags.Ephemeral });
             
             const now = Date.now();
             const lastActive = myTribeData.lastActive || 0;
             const timeDiff = now - lastActive;
-            
-            // COOLDOWN DE 12 HORAS
             const NOTIFICATION_COOLDOWN = 12 * 60 * 60 * 1000; 
 
-            // 1. GUARDAR ACTIVIDAD
             myTribeData.lastActive = now;
-            // Guardamos provisionalmente, luego guardaremos de nuevo si hay mensaje nuevo
-            saveTribes(guildId, tribes);
+            saveTribe(guildId, myTribeName, myTribeData);
 
-            // 2. GESTIÓN DEL MENSAJE PÚBLICO
+            // Actualizar panel para refrescar warns/info si hace falta
+            await updateTribePanel(interaction.guild, myTribeName);
+
             if (config.channels.checkin_log && timeDiff > NOTIFICATION_COOLDOWN) {
                 const ch = interaction.guild.channels.cache.get(config.channels.checkin_log);
                 if (ch) {
-                    // A) BORRAR MENSAJE VIEJO (Si existe)
                     if (myTribeData.lastCheckinMsgId) {
                         try {
                             const oldMsg = await ch.messages.fetch(myTribeData.lastCheckinMsgId).catch(() => null);
                             if (oldMsg) await oldMsg.delete();
-                        } catch (e) { console.log("No se pudo borrar mensaje viejo:", e.message); }
+                        } catch (e) {}
                     }
-
-                    // B) ENVIAR MENSAJE NUEVO
                     const sentMsg = await ch.send({
                         embeds: [new EmbedBuilder()
                             .setAuthor({ name: `Check-in Manual: ${myTribeName}`, iconURL: interaction.user.displayAvatarURL() })
@@ -120,40 +117,29 @@ module.exports = {
                         ]
                     }).catch(console.error);
 
-                    // C) GUARDAR ID DEL NUEVO MENSAJE
                     if (sentMsg) {
                         myTribeData.lastCheckinMsgId = sentMsg.id;
-                        saveTribes(guildId, tribes); // Guardar cambios con la ID
+                        saveTribe(guildId, myTribeName, myTribeData);
                     }
                 }
-                return interaction.reply({ content: `✅ **Check-in completado.**\n📢 Registro actualizado (Mensaje anterior eliminado).`, flags: MessageFlags.Ephemeral });
+                return interaction.reply({ content: `✅ **Check-in completado.**`, flags: MessageFlags.Ephemeral });
             } else {
-                const hoursLeft = Math.ceil((NOTIFICATION_COOLDOWN - timeDiff) / (1000 * 60 * 60));
-                return interaction.reply({ 
-                    content: `✅ **Check-in completado.** Tu tribu está a salvo.\n(Sin notificación pública para evitar spam. Espera ${hoursLeft}h).`, 
-                    flags: MessageFlags.Ephemeral 
-                });
+                return interaction.reply({ content: `✅ **Check-in completado.** (Sin log público por cooldown).`, flags: MessageFlags.Ephemeral });
             }
         }
 
-        // --- RESTO DE COMANDOS (Sin cambios) ---
-
+        // --- COMANDO UPDATEHELP (ADMIN) - ACTUALIZA PANELES ---
         if (subcommand === 'updatehelp') {
             if (!isServerAdmin) return interaction.reply({ content: '❌ Solo admins.', flags: MessageFlags.Ephemeral });
             await interaction.deferReply({ flags: MessageFlags.Ephemeral });
             let count = 0;
-            const helpEmbed = generateTribeHelpEmbed();
+            
             for (const tName in tribes) {
-                const t = tribes[tName];
-                if (t.channelId && t.instructionMessageId) {
-                    const ch = interaction.guild.channels.cache.get(t.channelId);
-                    if (ch) {
-                        const msg = await ch.messages.fetch(t.instructionMessageId).catch(() => null);
-                        if (msg) { await msg.edit({ embeds: [helpEmbed] }); count++; }
-                    }
-                }
+                // Actualiza o crea el panel dinámico en cada canal
+                await updateTribePanel(interaction.guild, tName);
+                count++;
             }
-            return interaction.editReply(`✅ Guía actualizada en ${count} canales.`);
+            return interaction.editReply(`✅ Paneles actualizados en ${count} tribus.`);
         }
 
         if (!myTribeData && !isServerAdmin) return interaction.reply({ content: '❌ No tienes tribu.', flags: MessageFlags.Ephemeral });
@@ -161,28 +147,164 @@ module.exports = {
         const myMember = myTribeData ? myTribeData.members.find(m => m.discordId === executorId) : null;
         const isLeader = myMember?.rango === 'Líder';
 
+        // --- COMANDO RECLUTAR ---
+        if (subcommand === 'reclutar') {
+            if (!isLeader && !isServerAdmin) return interaction.reply({ content: '❌ Solo el Líder puede reclutar.', flags: MessageFlags.Ephemeral });
+
+            const maxMembers = config.limits?.max_tribe_members || 0;
+            if (maxMembers > 0 && myTribeData.members.length >= maxMembers) {
+                return interaction.reply({ content: `❌ Tu tribu está llena (${myTribeData.members.length}/${maxMembers}).`, flags: MessageFlags.Ephemeral });
+            }
+
+            const targetUser = interaction.options.getUser('usuario');
+            if (targetUser.bot) return interaction.reply({ content: '❌ No bots.', flags: MessageFlags.Ephemeral });
+            if (targetUser.id === executorId) return interaction.reply({ content: '❌ Ya estás dentro.', flags: MessageFlags.Ephemeral });
+
+            // Verificar No Verificado
+            const targetMember = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
+            if (!targetMember) return interaction.reply({ content: '❌ Usuario no encontrado.', flags: MessageFlags.Ephemeral });
+            if (config.roles.unverified && targetMember.roles.cache.has(config.roles.unverified)) {
+                return interaction.reply({ content: `❌ **${targetUser.tag}** es No Verificado.`, flags: MessageFlags.Ephemeral });
+            }
+
+            await interaction.deferReply();
+
+            const inviteEmbed = new EmbedBuilder()
+                .setTitle('📨 Invitación de Tribu')
+                .setDescription(`Hola ${targetUser}, el líder de **${myTribeName}** te invita a unirte.`)
+                .setFooter({ text: 'Si aceptas, saldrás de tu tribu actual automáticamente.' })
+                .setColor('Gold');
+
+            const row = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId('accept_invite').setLabel('✅ Aceptar').setStyle(ButtonStyle.Success),
+                new ButtonBuilder().setCustomId('reject_invite').setLabel('❌ Rechazar').setStyle(ButtonStyle.Danger)
+            );
+
+            const msg = await interaction.editReply({ content: `${targetUser}`, embeds: [inviteEmbed], components: [row] });
+
+            const collector = msg.createMessageComponentCollector({ componentType: ComponentType.Button, time: 60000 });
+
+            collector.on('collect', async i => {
+                if (i.user.id !== targetUser.id) return i.reply({ content: '⛔ No es para ti.', flags: MessageFlags.Ephemeral });
+
+                if (i.customId === 'reject_invite') {
+                    await i.update({ content: `❌ **${targetUser.username}** rechazó.`, embeds: [], components: [] });
+                    return;
+                }
+
+                if (i.customId === 'accept_invite') {
+                    tribes = loadTribes(guildId); 
+                    const freshTribe = tribes[myTribeName];
+                    
+                    if (!freshTribe) return i.update({ content: '❌ Tribu no existe.', embeds: [], components: [] });
+                    if (maxMembers > 0 && freshTribe.members.length >= maxMembers) return i.update({ content: '❌ Tribu llena.', embeds: [], components: [] });
+
+                    // SALIDA TRIBU ANTERIOR
+                    let oldTribeName = null;
+                    for (const tName in tribes) {
+                        if (tribes[tName].members.some(m => m.discordId === targetUser.id)) {
+                            oldTribeName = tName;
+                            break;
+                        }
+                    }
+
+                    if (oldTribeName) {
+                        const oldTribe = tribes[oldTribeName];
+                        const memberIdx = oldTribe.members.findIndex(m => m.discordId === targetUser.id);
+                        const wasLeader = oldTribe.members[memberIdx].rango === 'Líder';
+
+                        oldTribe.members.splice(memberIdx, 1);
+
+                        const oldRole = interaction.guild.roles.cache.find(r => r.name === oldTribeName);
+                        const leaderRole = interaction.guild.roles.cache.get(config.roles.leader);
+                        
+                        if (oldRole) await targetMember.roles.remove(oldRole).catch(()=>{});
+                        if (wasLeader && leaderRole) await targetMember.roles.remove(leaderRole).catch(()=>{});
+
+                        if (oldTribe.members.length === 0) {
+                            if (oldTribe.channelId) await interaction.guild.channels.delete(oldTribe.channelId).catch(()=>{});
+                            if (oldRole) await oldRole.delete().catch(()=>{});
+                            delete tribes[oldTribeName];
+                        } else {
+                            if (wasLeader) {
+                                if (oldTribe.members.length === 1) {
+                                    const survivor = oldTribe.members[0];
+                                    survivor.rango = 'Líder';
+                                    const survivorObj = await interaction.guild.members.fetch(survivor.discordId).catch(()=>{});
+                                    if (survivorObj && leaderRole) await survivorObj.roles.add(leaderRole).catch(()=>{});
+                                    
+                                    const ch = interaction.guild.channels.cache.get(oldTribe.channelId);
+                                    if (ch) ch.send(`👑 **${survivor.username}** es el nuevo Líder.`);
+                                } else {
+                                    const ch = interaction.guild.channels.cache.get(oldTribe.channelId);
+                                    if (ch) {
+                                        const { embed, actionRow } = generateVoteEmbed(oldTribe, oldTribeName, interaction.client);
+                                        await ch.send({ content: `⚠️ Votación automática por nuevo líder.`, embeds: [embed], components: [actionRow] });
+                                    }
+                                }
+                            }
+                            // ACTUALIZAR PANEL TRIBU ANTIGUA (Si sigue existiendo)
+                            await updateTribePanel(interaction.guild, oldTribeName);
+                        }
+                    }
+
+                    // INGRESO NUEVA TRIBU
+                    freshTribe.members.push({
+                        username: targetUser.username,
+                        idPlay: 'Reclutado', 
+                        discordId: targetUser.id,
+                        hasKit: false,
+                        warnings: 0,
+                        rango: 'Miembro'
+                    });
+
+                    const tribeRole = interaction.guild.roles.cache.find(r => r.name === myTribeName);
+                    const survivorRole = interaction.guild.roles.cache.get(config.roles.survivor);
+                    
+                    if (tribeRole) await targetMember.roles.add(tribeRole).catch(()=>{});
+                    if (survivorRole) await targetMember.roles.add(survivorRole).catch(()=>{});
+
+                    saveTribes(guildId, tribes);
+                    await updateLog(interaction.guild, interaction.client);
+
+                    if (freshTribe.channelId) {
+                        const ch = interaction.guild.channels.cache.get(freshTribe.channelId);
+                        if (ch) ch.send(`👋 ¡Bienvenido **${targetUser.username}**!`);
+                    }
+
+                    // ACTUALIZAR PANEL TRIBU NUEVA
+                    await updateTribePanel(interaction.guild, myTribeName);
+
+                    await i.update({ content: `✅ **${targetUser.username}** unido a **${myTribeName}**.`, embeds: [], components: [] });
+                }
+            });
+            return;
+        }
+
+        // --- INFO ---
         if (subcommand === 'info') {
             const list = myTribeData.members.map(m => `${m.rango === 'Líder' ? '👑' : '👤'} **${m.username}**`).join('\n');
             return interaction.reply({ content: `🛡️ **Tribu: ${myTribeName}**\n\n${list}` });
         }
 
+        // --- VOTAR ---
         if (subcommand === 'votar') {
             await interaction.deferReply({ flags: MessageFlags.Ephemeral });
             const ch = interaction.guild.channels.cache.get(myTribeData.channelId);
-            if (!ch) return interaction.followUp('❌ Canal de tribu no encontrado.');
+            if (!ch) return interaction.followUp('❌ Canal no encontrado.');
             
             const { embed, actionRow } = generateVoteEmbed(myTribeData, myTribeName);
-            await ch.send({ content: `🗳️ **Votación iniciada por ${interaction.user}**`, embeds: [embed], components: [actionRow] });
-            saveTribes(guildId, tribes);
-            return interaction.followUp('✅ Votación lanzada en vuestro canal.');
+            await ch.send({ content: `🗳️ **Votación iniciada**`, embeds: [embed], components: [actionRow] });
+            return interaction.followUp('✅ Votación lanzada.');
         }
 
+        // --- ASCENDER / KICK ---
         if (['ascender', 'kick'].includes(subcommand)) {
-            if (!isLeader && !isServerAdmin) return interaction.reply({ content: '❌ Solo el Líder puede hacer esto.', flags: MessageFlags.Ephemeral });
+            if (!isLeader && !isServerAdmin) return interaction.reply({ content: '❌ Solo Líder.', flags: MessageFlags.Ephemeral });
             
             const targetUser = interaction.options.getUser('usuario');
             const targetIdx = myTribeData.members.findIndex(m => m.discordId === targetUser.id);
-            if (targetIdx === -1) return interaction.reply({ content: '❌ Ese usuario no está en tu tribu.', flags: MessageFlags.Ephemeral });
+            if (targetIdx === -1) return interaction.reply({ content: '❌ Usuario no está en tribu.', flags: MessageFlags.Ephemeral });
 
             const leaderRole = interaction.guild.roles.cache.get(config.roles.leader);
 
@@ -200,28 +322,35 @@ module.exports = {
                 
                 saveTribes(guildId, tribes);
                 await updateLog(interaction.guild, interaction.client);
-                return interaction.reply(`👑 **${targetUser}** es el nuevo Líder de **${myTribeName}**.`);
+                
+                // ACTUALIZAR PANEL
+                await updateTribePanel(interaction.guild, myTribeName);
+                
+                return interaction.reply(`👑 **${targetUser}** es el nuevo Líder.`);
             }
 
             if (subcommand === 'kick') {
-                if (targetUser.id === executorId) return interaction.reply({ content: '❌ No te puedes expulsar a ti mismo.', flags: MessageFlags.Ephemeral });
+                if (targetUser.id === executorId) return interaction.reply({ content: '❌ No te auto-expulses.', flags: MessageFlags.Ephemeral });
                 const mem = interaction.guild.members.cache.get(targetUser.id);
                 if (mem) {
                     const tRole = interaction.guild.roles.cache.find(r => r.name === myTribeName);
                     if (tRole) await mem.roles.remove(tRole).catch(() => {});
                     if (leaderRole) await mem.roles.remove(leaderRole).catch(() => {});
-                    const unverified = interaction.guild.roles.cache.get(config.roles.unverified);
-                    if (unverified) await mem.roles.add(unverified).catch(() => {});
                 }
                 myTribeData.members.splice(targetIdx, 1);
                 saveTribes(guildId, tribes);
                 await updateLog(interaction.guild, interaction.client);
+                
+                // ACTUALIZAR PANEL
+                await updateTribePanel(interaction.guild, myTribeName);
+
                 return interaction.reply(`👢 **${targetUser.tag}** expulsado.`);
             }
         }
         
+        // --- RENAME ---
         if (subcommand === 'rename') {
-            if (!isLeader && !isServerAdmin) return interaction.reply({ content: '❌ Solo el Líder.', flags: MessageFlags.Ephemeral });
+            if (!isLeader && !isServerAdmin) return interaction.reply({ content: '❌ Solo Líder.', flags: MessageFlags.Ephemeral });
             await interaction.deferReply();
             const newName = interaction.options.getString('nuevo_nombre');
             if (tribes[newName]) return interaction.followUp('❌ Nombre ocupado.');
@@ -238,6 +367,9 @@ module.exports = {
             saveTribes(guildId, tribes);
             await updateLog(interaction.guild, interaction.client);
             
+            // ACTUALIZAR PANEL (Con nuevo nombre)
+            await updateTribePanel(interaction.guild, newName);
+
             return interaction.followUp(`✅ Tribu renombrada a **${newName}**.`);
         }
     },

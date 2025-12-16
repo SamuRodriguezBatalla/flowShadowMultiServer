@@ -45,5 +45,17 @@ if (fs.existsSync(eventsPath)) {
     }
 }
 
-// 3. Login
+// 3. SISTEMA ANTI-CRASH (IMPORTANTE PARA VPS)
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('🚨 [Anti-Crash] Error no manejado (Rejection):', reason);
+    // Aquí podrías enviar un log a un canal de Discord si quisieras
+});
+
+process.on('uncaughtException', (error) => {
+    console.error('🚨 [Anti-Crash] Error fatal (Exception):', error);
+});
+
+console.log("🛡️ Sistemas anti-crash activados.");
+
+// 4. Login
 client.login(process.env.BOT_TOKEN);
