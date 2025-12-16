@@ -1,21 +1,23 @@
 const { SlashCommandBuilder, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
 const { sendRconCommand } = require('../utils/rconManager');
+const { getAllServers } = require('../utils/serverManager'); //
+const { restartNitrado } = require('../utils/nitradoManager'); //
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('arkrestart')
-        .setDescription('🔄 Reinicio Seguro (Guarda mundo y detiene el servidor).')
+        .setDescription('🔄 Reinicio Seguro de TODOS los servidores (RCON y Nitrado).')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
     async execute(interaction) {
-        // 1. Botón de confirmación para evitar accidentes
+        // 1. Botón de confirmación (Igual que antes)
         const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('confirm_restart').setLabel('🔴 SÍ, REINICIAR AHORA').setStyle(ButtonStyle.Danger),
+            new ButtonBuilder().setCustomId('confirm_restart').setLabel('🔴 SÍ, REINICIAR CLUSTER').setStyle(ButtonStyle.Danger),
             new ButtonBuilder().setCustomId('cancel_restart').setLabel('Cancelar').setStyle(ButtonStyle.Secondary)
         );
 
         const msg = await interaction.reply({ 
-            content: '⚠️ **¿Estás seguro?**\nEsto ejecutará `SaveWorld` y luego `DoExit`.\nSi tu host tiene auto-reinicio, el servidor volverá en unos minutos.',
+            content: '⚠️ **¿Estás seguro de reiniciar TODO el cluster?**\n- **PC (RCON):** Guardará mundo y ejecutará DoExit.\n- **Consola (Nitrado):** Enviará orden de reinicio forzado a la API.',
             components: [row],
             fetchReply: true
         });
@@ -31,23 +33,35 @@ module.exports = {
             }
 
             if (i.customId === 'confirm_restart') {
-                await i.update({ content: '🔄 **Iniciando protocolo de reinicio...**', components: [] });
+                await i.update({ content: '🔄 **Iniciando protocolo de reinicio global...**', components: [] });
 
-                // Paso 1: Guardar
-                await interaction.followUp('💾 Ejecutando `SaveWorld`...');
-                await sendRconCommand(interaction.guild.id, 'SaveWorld');
+                const servers = getAllServers(interaction.guild.id);
+                let log = '';
 
-                // Paso 2: Esperar 3 segundos para asegurar guardado
-                await new Promise(r => setTimeout(r, 3000));
-
-                // Paso 3: Apagar
-                const result = await sendRconCommand(interaction.guild.id, 'DoExit');
-
-                if (result.success) {
-                    await interaction.followUp('🛑 `DoExit` enviado. El servidor se está deteniendo/reiniciando.');
-                } else {
-                    await interaction.followUp(`❌ Error al enviar DoExit: ${result.message}`);
+                // Iteramos por cada servidor para aplicar el método correcto
+                for (const server of servers) {
+                    const sName = server.name || server.server_name;
+                    
+                    try {
+                        if (server.type === 'RCON') {
+                            // Protocolo PC
+                            await sendRconCommand(interaction.guild.id, 'SaveWorld', sName);
+                            // Esperamos un poco para asegurar guardado (importante en Ark)
+                            await new Promise(r => setTimeout(r, 2000)); 
+                            const res = await sendRconCommand(interaction.guild.id, 'DoExit', sName);
+                            log += `💻 **${sName}:** ${res.success ? '✅ DoExit enviado' : '❌ Error RCON'}\n`;
+                        } 
+                        else if (server.type === 'NITRADO') {
+                            // Protocolo Consola
+                            const res = await restartNitrado(interaction.guild.id, 'Reinicio programado por Discord');
+                            log += `🎮 **${sName}:** ${res.success ? '✅ Reiniciando (API)' : `❌ Error: ${res.message}`}\n`;
+                        }
+                    } catch (e) {
+                        log += `⚠️ **${sName}:** Error inesperado: ${e.message}\n`;
+                    }
                 }
+
+                await interaction.followUp(`🏁 **Informe de Reinicio:**\n\n${log}`);
             }
         });
     },

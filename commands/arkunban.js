@@ -1,12 +1,12 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
 const { removeGameBan, getGameBans } = require('../utils/dataManager');
-const { sendRconCommand } = require('../utils/rconManager');
+const { sendGlobalCommand } = require('../utils/serverManager'); //
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('arkunban')
-        .setDescription('🦖 Quita un baneo del servidor de Ark.')
-        .addStringOption(o => o.setName('id_ark').setDescription('ID del juego a desbanear (SteamID/EOS/PSN)').setRequired(true))
+        .setDescription('🦖 Quita un baneo del servidor de Ark (PC y Consola).')
+        .addStringOption(o => o.setName('id_ark').setDescription('ID del juego a desbanear').setRequired(true))
         .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers),
 
     async execute(interaction) {
@@ -14,23 +14,21 @@ module.exports = {
         const arkId = interaction.options.getString('id_ark');
         const guildId = interaction.guild.id;
 
-        // 1. Ejecutar Unban en RCON
-        const rconResult = await sendRconCommand(guildId, `UnbanPlayer "${arkId}"`);
-
-        if (!rconResult.success) {
-            return interaction.editReply(`❌ **Error RCON:** ${rconResult.message}`);
-        }
+        // 1. Ejecutar Unban en TODOS los servidores (Cluster Híbrido)
+        const result = await sendGlobalCommand(guildId, `UnbanPlayer "${arkId}"`);
 
         // 2. Buscar si teníamos registrado ese ban para avisar al usuario
         const bans = getGameBans(guildId);
         const banInfo = bans.find(b => b.ark_id === arkId);
         
-        // 3. Eliminar de la base de datos
-        removeGameBan(guildId, arkId);
+        // 3. Eliminar de la base de datos si al menos un server respondió bien
+        if (result.success) {
+            removeGameBan(guildId, arkId);
+        }
 
-        // 4. Intentar avisar al usuario (si tenemos su Discord ID)
+        // 4. Notificaciones
         let notifStatus = '';
-        if (banInfo && banInfo.discord_id) {
+        if (banInfo && banInfo.discord_id && result.success) {
             try {
                 const user = await interaction.client.users.fetch(banInfo.discord_id);
                 await user.send({
@@ -40,17 +38,15 @@ module.exports = {
                         .setDescription(`Un administrador ha levantado tu baneo en el servidor de Ark de **${interaction.guild.name}**.`)
                         .setTimestamp()]
                 });
-                notifStatus = ' (Usuario notificado por MD)';
-            } catch (e) {
-                notifStatus = ' (No se pudo notificar al usuario)';
-            }
+                notifStatus = ' (Usuario notificado)';
+            } catch (e) {}
         }
 
         const embed = new EmbedBuilder()
             .setTitle('🦖 Jugador Desbaneado en Ark')
-            .setColor('Green')
-            .setDescription(`El ID \`${arkId}\` ha sido desbaneado correctamente.${notifStatus}`)
-            .addFields({ name: '🤖 Respuesta RCON', value: `\`${rconResult.response || 'Ok'}\`` });
+            .setColor(result.success ? 'Green' : 'Red')
+            .setDescription(`Gestión del ID \`${arkId}\` finalizada.${notifStatus}`)
+            .addFields({ name: '🤖 Informe Servidores', value: result.message.substring(0, 1024) });
 
         await interaction.editReply({ embeds: [embed] });
     },

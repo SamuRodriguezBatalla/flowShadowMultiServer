@@ -30,6 +30,10 @@ async function callNitrado(guildId, endpoint, method = 'GET', data = {}) {
 
         return { success: true, data: response.data.data };
     } catch (error) {
+        if (error.response && error.response.status === 429) {
+            console.warn(`⚠️ Rate Limit Nitrado en ${guildId}. Pausando peticiones...`);
+            return { success: false, message: '⏳ **API Saturada (429).** Intenta de nuevo en unos segundos.' };
+        }
         console.error('Error Nitrado:', error.response?.data || error.message);
         const errorMsg = error.response?.data?.message || error.message;
         return { success: false, message: `❌ Error API: ${errorMsg}` };

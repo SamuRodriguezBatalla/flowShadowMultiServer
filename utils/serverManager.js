@@ -34,11 +34,20 @@ async function sendGlobalCommand(guildId, command, targetName = null) {
                 if(res.rawResults && res.rawResults[0]) res = res.rawResults[0];
             } 
             else if (server.type === 'NITRADO') {
-                const nitradoRes = await sendNitradoCommand(guildId, command); // Ajuste: sendNitradoCommand usa el service_id internamente si solo hay uno, o puedes pasar server.service_id si lo modificas
+                const nitradoRes = await sendNitradoCommand(guildId, command);
+                
+                // Feedback honesto de la API
+                let statusMsg = 'Error API';
+                if (nitradoRes.success) {
+                    statusMsg = '📨 Enviado a la cola (Sin confirmación visual)'; 
+                } else {
+                    statusMsg = nitradoRes.message;
+                }
+                
                 res = { 
                     server: server.server_name, 
                     success: nitradoRes.success, 
-                    response: nitradoRes.message || (nitradoRes.success ? 'Comando enviado a API.' : 'Error API')
+                    response: statusMsg 
                 };
             }
         } catch (e) {
@@ -48,12 +57,15 @@ async function sendGlobalCommand(guildId, command, targetName = null) {
     }));
 
     const output = results.map(r => `**[${r.server || 'Server'}]:** ${r.success ? '✅ ' + (r.response || 'Ok') : '❌ ' + (r.message || 'Error')}`).join('\n');
-    return { success: true, message: output };
+    
+    // MEJORA: Calculamos si hubo éxito global (al menos 1 servidor funcionó)
+    const globalSuccess = results.some(r => r.success);
+
+    return { success: globalSuccess, message: output, results: results };
 }
 
 /**
- * NUEVA FUNCIÓN: Obtiene estado y jugadores de TODOS los servidores unificados.
- * Devuelve un array de objetos estandarizados.
+ * Obtiene estado y jugadores de TODOS los servidores unificados.
  */
 async function getGlobalStatus(guildId) {
     const allServers = getAllServers(guildId);
@@ -66,7 +78,7 @@ async function getGlobalStatus(guildId) {
             type: server.type,
             online: false,
             playerCount: 0,
-            playerList: [] // Array de strings "Nombre (ID)"
+            playerList: [] 
         };
 
         try {
@@ -82,7 +94,6 @@ async function getGlobalStatus(guildId) {
                         const lines = responseText.split('\n').filter(l => l.includes(','));
                         data.playerCount = lines.length;
                         data.playerList = lines.map(line => {
-                            // Ark RCON: "0. Nombre, ID"
                             const parts = line.split(',');
                             return parts[0].split('.')[1]?.trim() || parts[0].trim();
                         });
@@ -93,8 +104,7 @@ async function getGlobalStatus(guildId) {
                 const res = await getNitradoPlayers(guildId);
                 if (res.success) {
                     data.online = res.status === 'started';
-                    data.playerCount = res.players || 0; // Nitrado devuelve número
-                    // Nitrado a veces devuelve array de objetos players, a veces null si está privado
+                    data.playerCount = res.players || 0; 
                     if (res.playerList && Array.isArray(res.playerList)) {
                         data.playerList = res.playerList.map(p => p.name);
                     }
