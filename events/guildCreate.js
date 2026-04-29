@@ -1,12 +1,12 @@
 const { Events, EmbedBuilder, ChannelType, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
-// 👇 ENLACE DE SOPORTE
+// 👇 ENLACE DE SOPORTE (Configura esto con tu link real)
 const SUPPORT_INVITE_LINK = 'https://discord.gg/pBPRS64GKq';
 
 module.exports = {
     name: Events.GuildCreate,
     async execute(guild) {
-        // 1. Buscar canal de texto para enviar el mensaje
+        // 1. Buscar el mejor canal de texto para enviar el mensaje (System o General)
         let channel = guild.systemChannel;
         
         if (!channel) {
@@ -16,87 +16,105 @@ module.exports = {
             );
         }
 
-        // 2. Obtener la URL del Avatar del Bot (Tamaño grande para que se vea bien de banner)
-        // Usamos size: 1024 para máxima calidad y forceStatic: false por si es un GIF animado
+        // 2. Obtener Avatar en Alta Calidad
         const botAvatarUrl = guild.client.user.displayAvatarURL({ size: 1024, forceStatic: false });
 
-        // 3. Botón de Soporte
+        // 3. Botón de Soporte Técnico
         const row = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
-                .setLabel('📞 Servidor de Soporte')
+                .setLabel('🛠️ Soporte Técnico')
                 .setStyle(ButtonStyle.Link)
                 .setURL(SUPPORT_INVITE_LINK)
         );
 
-        // 4. Embed "FlowShadow"
+        // 4. EMBED MAESTRO: MANUAL DE CAPACIDADES COMPLETO
         const welcomeEmbed = new EmbedBuilder()
-            .setColor('#9D00FF') // Morado FlowShadow
-            .setTitle(`🔮 FlowShadow ha llegado a ${guild.name}`)
-            .setDescription(`Soy el sistema definitivo de gestión para servidores de **Ark**.
-            A continuación te explico cómo configurarme y **dónde** usar cada comando.
+            .setColor('#9D00FF') // Morado Premium FlowShadow
+            .setTitle(`✅ SISTEMA FLOWSHADOW INSTALADO EN: ${guild.name.toUpperCase()}`)
+            .setDescription(`**Gracias por adquirir la licencia de FlowShadow.**
+            A continuación se detalla la **lista completa de comandos** y capacidades del sistema.
             
-            > **🚀 PASO 1: INSTALACIÓN (OBLIGATORIO)**
-            > **Comando:** \`/setup\`
-            > **📍 Dónde:** En este mismo canal.
-            > **Qué hace:** Creará automáticamente las categorías, roles (Líder, Superviviente...) y canales necesarios.`)
-            .setThumbnail(botAvatarUrl) // Miniatura arriba a la derecha (Avatar)
+            ⚠️ **Primer paso obligatorio:** Ejecuta \`/setup\` para crear la estructura base.`)
+            .setThumbnail(botAvatarUrl)
             .addFields(
-                { name: '👑 Configuración del Servidor (Admins)', value: 
-                    '**📍 Dónde:** Cualquier canal de admins.\n' +
-                    '`/setupark` - Vincula tu servidor de Ark (necesitas IP, Puerto y RCON).\n' +
-                    '`/unlinkark` - Borra los datos del servidor Ark.\n' +
-                    '`/adminconfig` - Establece límites de miembros por tribu y alianzas.\n' +
-                    '`/fixroles` - Si alguien no tiene rol, esto arregla sus permisos.\n' +
-                    '`/newseason` - Inicia nueva temporada (Borra canales, guarda historial, quita warns).\n' +
-                    '`/fullwipe` - ⚠️ Borrado total y reinicio a Season 0.'
+                { 
+                    name: '⚙️ 1. Configuración y Estructura (Admins)', 
+                    value: `\`setup\` - Crea roles, categorías y canales esenciales.
+                    \`setupark\` - Vincula servidor PC (RCON).
+                    \`setupnitrado\` - Vincula servidor Consola (API).
+                    \`setupstatus\` - Crea el panel de estado en vivo.
+                    \`adminconfig\` - **Configura límites:** Máx. miembros por tribu y Máx. alianzas.
+                    \`syncchannels\` - Repara canales de registro perdidos.
+                    \`fixroles\` - Asigna rol "No Verificado" a usuarios sin rol.
+                    \`unlinkark\` / \`setupnitrado desvincular\` - Borra datos de conexión.`
                 },
-                { name: '🦖 Panel de Estado y RCON', value: 
-                    '**📍 Dónde:** Canal específico (Ej: #estado-servidor).\n' +
-                    '`/setupstatus` - **¡IMPORTANTE!** Ejecútalo DENTRO del canal donde quieres que aparezca el panel de estado en vivo.\n' +
-                    '`/online` - Muestra lista de jugadores conectados.\n' +
-                    '`/rcon` - Ejecuta comandos de consola (Cheat SaveWorld, etc).\n' +
-                    '`/arkbroadcast` - Envía un mensaje a la pantalla de todos los jugadores en Ark.'
+                { 
+                    name: '🛡️ 2. Moderación y Sanciones (Staff)', 
+                    value: `\`warn\` / \`unwarn\` - Sistema de advertencias (acumulables).
+                    \`mute\` / \`unmute\` - Silencia a un usuario o **tribu entera** en Discord.
+                    \`kick\` - Expulsa a un jugador del servidor de Ark.
+                    \`arkban\` / \`arkunban\` - Baneo de Ark (Temporal/Perm/Season).
+                    \`permaban\` / \`unpermaban\` - **Lista Negra:** Ban permanente de Discord + Ark.
+                    \`banlist\` - Muestra la lista de baneados activos.
+                    \`checkid\` - **Anti-Multicuentas:** Detecta IDs de juego duplicadas.
+                    \`setid\` / \`editid\` - Modifica manualmente la ID registrada de un usuario.
+                    \`createprotected\` - Crea roles inmunes al Wipe.`
                 },
-                { name: '🛡️ Seguridad y Moderación', value: 
-                    '**📍 Dónde:** Canales de logs o cualquier chat.\n' +
-                    '`/arkban` - Banea de Ark y Discord a la vez.\n' +
-                    '`/kick` - Expulsa del servidor de juego.\n' +
-                    '`/permaban` - Añade a la Lista Negra (El usuario no podrá volver ni tras un Wipe).\n' +
-                    '`/banlist` - Revisa quién está baneado.\n' +
-                    '`/checkid` - Busca si hay IDs de Steam/PSN duplicadas en la base de datos.'
+                { 
+                    name: '🦖 3. Gestión del Servidor y Wipes', 
+                    value: `\`arkrestart\` - Reinicio seguro (SaveWorld + DoExit / API Restart).
+                    \`arkbroadcast\` - Mensaje global en pantalla a todos los servidores.
+                    \`rcon\` / \`console\` - Ejecuta comandos de administrador (Cheats) desde Discord.
+                    \`newseason\` - **Nueva Temporada:** Archiva tribus, borra canales, limpia warns.
+                    \`fullwipe\` - **Reinicio Total:** Borra todo y vuelve a Season 0.
+                    \`historycheck\` - Consulta datos de tribus de seasons pasadas.
+                    \`nuke\` - Borra y recrea un canal de texto.
+                    \`clear\` - Borra mensajes masivamente.`
                 },
-                { name: '🦕 Gestión de Tribus (Para Líderes)', value: 
-                    '**📍 Dónde:** En el canal privado de su tribu.\n' +
-                    '`/tribu reclutar` - Invita a un jugador (le mete al canal y le da rol).\n' +
-                    '`/tribu kick` - Saca a alguien de la tribu.\n' +
-                    '`/tribu ascender` - Cede el liderazgo a otro.\n' +
-                    '`/tribu rename` - Cambia el nombre de la tribu y del canal.\n' +
-                    '`/diplomacia` - Gestiona alianzas o declara guerras (crea canales compartidos).'
+                { 
+                    name: '🏕️ 4. Sistema de Tribus (Jugadores)', 
+                    value: `\`tribu info\` - Ver estado de la tribu.
+                    \`tribu checkin\` - **Vital:** Renueva la base (evita borrado automático en 7 días).
+                    \`tribu votar\` - Elecciones democráticas para cambiar de líder.
+                    \`tribu reclutar\` - Invitar miembros (crea roles y permisos).
+                    \`tribu kick\` / \`ascender\` / \`rename\` - Gestión de líder.
+                    \`tribeinfo\` - Ver ficha pública de otra tribu.
+                    \`coords\` - Guardar/Listar coordenadas privadas de la tribu.`
                 },
-                { name: '👤 Supervivientes (Utilidades)', value: 
-                    '**📍 Dónde:** Canales generales o de tribu.\n' +
-                    '`/tribu checkin` - **Vital:** Renueva la actividad de la base para que no se borre.\n' +
-                    '`/infoplayer` - Muestra tu ficha, ID registrada y Warns.\n' +
-                    '`/mercado` - Crea un post de compra/venta con botón de contacto.\n' +
-                    '`/report` - Abre un formulario secreto para reportar jugadores.\n' +
-                    '`/suggestvote` - Crea una encuesta de Sí/No.'
+                { 
+                    name: '⚔️ 5. Diplomacia y Economía', 
+                    value: `\`diplomacia alianza\` - Crea canal compartido entre tribus.
+                    \`diplomacia guerra\` / \`paz\` - Gestiona conflictos y canales de guerra.
+                    \`diplomacia raideo\` - Alerta global de ataque en curso.
+                    \`mercado\` - Sistema de compra/venta con tickets de negociación.
+                    \`giveaway\` - Sistema de sorteos automáticos.`
+                },
+                { 
+                    name: '👤 6. Utilidades Generales', 
+                    value: `\`infoplayer\` - Ficha de usuario (ID, Warns, Kit).
+                    \`kit\` - Admin marca si el usuario recibió su Starter Kit.
+                    \`online\` - Lista de jugadores conectados en todo el cluster.
+                    \`report\` - Formulario anónimo de reportes.
+                    \`suggestvote\` - Encuestas de Sí/No.
+                    \`soporte\` - Enlace al discord de ayuda.
+                    \`ayudanitrado\` - Guía para obtener Token API.`
                 }
             )
-            .setImage(botAvatarUrl) // <--- AQUÍ ESTÁ EL CAMBIO: Usa la misma URL del avatar en grande
-            .setFooter({ text: 'FlowShadow System • Multi-Server Edition' })
+            .setImage(botAvatarUrl)
+            .setFooter({ text: 'FlowShadow System • Enterprise Edition • Manual de Comandos' })
             .setTimestamp();
 
-        // 5. Enviar mensaje (Sin archivos adjuntos locales)
+        // 5. Enviar mensaje
         try {
             if (channel) {
                 await channel.send({ embeds: [welcomeEmbed], components: [row] });
             } else {
                 const owner = await guild.fetchOwner();
-                await owner.send({ embeds: [welcomeEmbed], components: [row] });
+                await owner.send({ content: `¡Hola! No encontré un canal donde presentarme en **${guild.name}**, así que te dejo el manual aquí:`, embeds: [welcomeEmbed], components: [row] });
             }
-            console.log(`📥 FlowShadow unido a: ${guild.name} (ID: ${guild.id})`);
+            console.log(`📥 [GuildCreate] FlowShadow desplegado en: ${guild.name} (ID: ${guild.id})`);
         } catch (error) {
-            console.error(`❌ Error enviando bienvenida en ${guild.name}:`, error.message);
+            console.error(`❌ Error enviando mensaje de bienvenida en ${guild.name}:`, error.message);
         }
     },
 };

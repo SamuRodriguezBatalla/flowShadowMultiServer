@@ -1,5 +1,6 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits } = require('discord.js');
-const { loadTribes, saveTribes, updateRegistrationState, deleteRegistrationState, loadGuildConfig } = require('./dataManager');
+// AÑADIDO: saveTribe en los imports
+const { loadTribes, saveTribe, updateRegistrationState, deleteRegistrationState, loadGuildConfig } = require('./dataManager');
 const { updateLog } = require('./logger');
 const { updateTribePanel } = require('./tribePanel');
 
@@ -173,7 +174,6 @@ async function sendConfirmationSummary(channel, id, tribe, title) {
 
 /**
  * Finaliza el registro, asigna roles, crea canal de tribu (si es nueva) y da la bienvenida.
- * (VERSIÓN LIGERA: Sin Canvas)
  */
 async function finalizarRegistro(member, channel, idPlay, tName, config, isNewTribe) {
     try { deleteRegistrationState(channel.id); } catch(e) {}
@@ -181,11 +181,13 @@ async function finalizarRegistro(member, channel, idPlay, tName, config, isNewTr
     await channel.send(`✅ **¡Registro Completado!** Procesando...`);
 
     const guild = member.guild;
+    
+    // 1. Cargar datos
     let tribes = loadTribes(guild.id);
     let tData = tribes[tName];
     let tRole = guild.roles.cache.find(r => r.name === tName);
 
-    // Si es nueva tribu, crear Rol y Canal
+    // 2. Si es nueva tribu, crear infraestructura
     if (isNewTribe || !tData) {
         if (!tRole) tRole = await guild.roles.create({ name: tName, color: 'Random', reason: 'Registro BotArk' });
         
@@ -211,12 +213,13 @@ async function finalizarRegistro(member, channel, idPlay, tName, config, isNewTr
             alliances: [], 
             allianceChannels: [] 
         };
-        tribes[tName] = tData; 
+        // No guardamos en el objeto gigante 'tribes' para evitar race condition
+        // Lo guardaremos individualmente abajo
         
         await channel.send(`✅ Tribu **${tName}** creada correctamente.`);
     }
 
-    // Gestión de Roles
+    // 3. Gestión de Roles Discord
     const rank = (tData.members.length === 0) ? 'Líder' : 'Miembro';
     
     if (tRole) await member.roles.add(tRole).catch(()=>{});
@@ -232,7 +235,7 @@ async function finalizarRegistro(member, channel, idPlay, tName, config, isNewTr
         if (lRole) await member.roles.add(lRole).catch(()=>{}); 
     }
 
-    // Guardar Datos
+    // 4. Actualizar Objeto de la Tribu
     tData.members.push({ 
         username: member.user.username, 
         idPlay: idPlay, 
@@ -242,12 +245,14 @@ async function finalizarRegistro(member, channel, idPlay, tName, config, isNewTr
         rango: rank 
     });
     
-    saveTribes(guild.id, tribes); 
+    // 5. [CRÍTICO] GUARDADO SEGURO
+    saveTribe(guild.id, tName, tData); 
     
+    // 6. Logs y Paneles
     await updateLog(guild, member.client);
     await updateTribePanel(guild, tName);
 
-    // Mensaje de Bienvenida Global (SIN CANVAS - LIGERO)
+    // 7. Bienvenida
     const welcomeChan = guild.channels.cache.get(config.channels.welcome);
     if (welcomeChan) {
         try {
@@ -270,7 +275,7 @@ async function finalizarRegistro(member, channel, idPlay, tName, config, isNewTr
         }
     }
 
-    // Borrar canal de registro
+    // 8. Limpieza
     await channel.send(`👋 **Todo listo.** Cerrando canal...`);
     setTimeout(async () => { try { if (channel) await channel.delete(); } catch (e) {} }, 5000);
 }

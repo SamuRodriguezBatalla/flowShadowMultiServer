@@ -3,7 +3,7 @@ const { sendGlobalCommand, getAllServers } = require('../utils/serverManager');
 
 module.exports = {
     data: new SlashCommandBuilder()
-        .setName('Console') // O 'comando'
+        .setName('console') // O 'comando'
         .setDescription('Ejecuta comandos en tus servidores (PC/Consola).')
         .addStringOption(o => o.setName('comando').setDescription('Cheat command (ej: SaveWorld)').setRequired(true))
         .addStringOption(o => o.setName('servidor').setDescription('Servidor específico (Opcional)').setAutocomplete(true))

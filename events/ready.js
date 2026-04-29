@@ -1,11 +1,13 @@
 const { Events, EmbedBuilder, ChannelType, PermissionFlagsBits } = require('discord.js');
 const { loadTribes, saveTribes, loadGuildConfig, getAllPremiumGuilds, updateLastAlert, getGameBans, removeGameBan, getRegistrationState } = require('../utils/dataManager');
 const { updateLog } = require('../utils/logger');
-const { sendGlobalCommand } = require('../utils/serverManager'); // <--- GESTOR HÍBRIDO
+const { sendGlobalCommand } = require('../utils/serverManager'); 
 const { updateStatusPanels } = require('../utils/statusUpdater');
+// 👇 NUEVA IMPORTACIÓN PARA EL LOG DE RCON
+const { checkServerLogs } = require('../utils/serverLogWatcher');
 
-const MAINTENANCE_INTERVAL = 5 * 60 * 1000; 
-const MAX_REGISTRATION_AGE = 60 * 60 * 1000; 
+const MAINTENANCE_INTERVAL = 5 * 60 * 1000; // 5 Minutos
+const MAX_REGISTRATION_AGE = 60 * 60 * 1000; // 1 Hora
 
 let isSyncing = false;
 
@@ -15,10 +17,10 @@ module.exports = {
     async execute(client) {
         console.log(`✅ Bot Online: ${client.user.tag} - Sistema Híbrido V17.`);
         
-        // Ejecución inicial
+        // Ejecución inicial al encender
         runMaintenance(client);
         
-        // Bucle infinito
+        // Bucle infinito (cada 5 minutos)
         setInterval(() => runMaintenance(client), MAINTENANCE_INTERVAL);
     },
 };
@@ -27,25 +29,25 @@ async function runMaintenance(client) {
     if (isSyncing) return;
     isSyncing = true;
 
-    // Iterar sobre todos los servidores
+    // Iterar sobre todos los servidores donde está el bot
     for (const guild of client.guilds.cache.values()) {
         try {
             const config = loadGuildConfig(guild.id);
             if (!config) continue;
 
-            // A) AUTO-ROL
+            // A) AUTO-ROL (Asignar rol a quienes no lo tengan)
             await autoAssignRoles(guild, config);
 
-            // B) MANTENIMIENTO TRIBUS
+            // B) MANTENIMIENTO TRIBUS (Avisos y borrado por inactividad)
             await checkTribes(guild, config, client);
 
-            // C) LIMPIEZA DE REGISTROS
+            // C) LIMPIEZA DE REGISTROS (Canales abandonados)
             await checkRegistrationTimeouts(guild, config);
 
-            // D) BANEOS TEMPORALES ARK (HÍBRIDO)
+            // D) BANEOS TEMPORALES ARK (Desbaneo automático)
             await checkGameBans(guild);
 
-            // F) LOG DE MANTENIMIENTO
+            // F) LOG DE MANTENIMIENTO (Consola)
             console.log(`📡 [${guild.name}] Mantenimiento completado.`);
 
         } catch (e) {
@@ -53,12 +55,17 @@ async function runMaintenance(client) {
         }
     }
     
-    // Actualizar paneles visuales (Globalmente)
-    // Nota: updateStatusPanels ya gestiona la lógica híbrida internamente
+    // G) ACTUALIZAR PANELES DE ESTADO (Global)
     await updateStatusPanels(client);
     
-    // E) SISTEMA DE PAGOS
+    // H) SISTEMA DE PAGOS (Licencias)
     await checkPayments(client);
+
+    // ==================================================================
+    // 🔥 I) NUEVO: REVISIÓN DE LOGS DEL SERVIDOR (RCON)
+    // ==================================================================
+    // Busca comandos admin ejecutados dentro del juego y los envía a Discord
+    await checkServerLogs(client);
     
     isSyncing = false;
 }
@@ -95,8 +102,8 @@ async function checkTribes(guild, config, client) {
     let modified = false;
     const now = Date.now();
     
-    const MS_TO_WARN = 6 * 24 * 60 * 60 * 1000; 
-    const MS_TO_DELETE = 7 * 24 * 60 * 60 * 1000; 
+    const MS_TO_WARN = 6 * 24 * 60 * 60 * 1000; // 6 días
+    const MS_TO_DELETE = 7 * 24 * 60 * 60 * 1000; // 7 días
     
     const toDelete = [];
     const logChannel = config.channels.checkin_log ? guild.channels.cache.get(config.channels.checkin_log) : null;
@@ -104,6 +111,7 @@ async function checkTribes(guild, config, client) {
     for (const [tName, tData] of Object.entries(tribes)) {
         const diff = now - (tData.lastActive || 0);
         
+        // Aviso a los 6 días
         if (tData.channelId && diff >= MS_TO_WARN && diff < MS_TO_WARN + MAINTENANCE_INTERVAL) {
             const ch = guild.channels.cache.get(tData.channelId);
             if (ch) {
@@ -111,7 +119,7 @@ async function checkTribes(guild, config, client) {
                     content: '@here', 
                     embeds: [new EmbedBuilder()
                         .setTitle('⚠️ AVISO DE INACTIVIDAD')
-                        .setDescription('Vuestra base está a punto de ser borrada por inactividad.\nUsad `/tribu checkin` antes de 24 horas.')
+                        .setDescription('Vuestra base está a punto de ser borrada por inactividad.\nUsad `/tribu checkin` o hablad por aquí antes de 24 horas.')
                         .setColor('Red')
                     ] 
                 }).catch(()=>{});
@@ -126,6 +134,7 @@ async function checkTribes(guild, config, client) {
             }
         }
         
+        // Borrado a los 7 días
         if (diff > MS_TO_DELETE) {
             toDelete.push(tName);
         }
@@ -169,7 +178,7 @@ async function checkRegistrationTimeouts(guild, config) {
 
     for (const [id, channel] of regChannels) {
         const state = getRegistrationState(channel.id);
-        if (state && state.step === 10) continue; 
+        if (state && state.step === 10) continue; // Si está esperando aceptación, NO borrar
 
         const lastMessage = channel.lastMessageId 
             ? await channel.messages.fetch(channel.lastMessageId).catch(() => null) 
@@ -178,8 +187,7 @@ async function checkRegistrationTimeouts(guild, config) {
         const lastActivity = lastMessage ? lastMessage.createdTimestamp : channel.createdTimestamp;
         
         if (now - lastActivity > MAX_REGISTRATION_AGE) {
-            console.log(`🗑️ [Timeout] Limpiando canal inactivo: ${channel.name}`);
-
+            // ... lógica de borrado y aviso ...
             let userId = null;
             if (state) userId = state.user_id;
             else if (channel.topic && channel.topic.includes('USER:')) {
@@ -190,69 +198,38 @@ async function checkRegistrationTimeouts(guild, config) {
             if (userId) {
                 const member = await guild.members.fetch(userId).catch(() => null);
                 if (member) {
-                    let dmSent = false;
                     try {
                         await member.send({
                             embeds: [new EmbedBuilder()
                                 .setTitle('⏳ Registro Cancelado')
                                 .setColor('Red')
                                 .setDescription('Tu canal de registro se ha cerrado automáticamente tras **1 hora** sin actividad.')
-                                .addFields({ name: '🔄 ¿Cómo volver?', value: 'Simplemente **escribe en cualquier chat del servidor** y se abrirá de nuevo.' })
                                 .setFooter({ text: guild.name })
                             ]
                         });
-                        dmSent = true;
-                    } catch (e) { dmSent = false; }
-
-                    if (!dmSent && config.channels.error_log) {
-                        const errorChan = guild.channels.cache.get(config.channels.error_log);
-                        if (errorChan) {
-                            await errorChan.send({
-                                content: `${member}`,
-                                embeds: [new EmbedBuilder()
-                                    .setTitle('⚠️ Registro Caducado')
-                                    .setColor('Orange')
-                                    .setDescription(`El canal de **${member.user.tag}** fue eliminado por inactividad.`)
-                                    .addFields({ name: 'Nota', value: 'Tiene MDs bloqueados. Debe escribir en el chat para reiniciar.' })
-                                    .setTimestamp()
-                                ]
-                            });
-                        }
-                    }
+                    } catch (e) { }
                 }
             }
-            await channel.delete('Limpieza automática por inactividad').catch(e => console.error(`Error borrando ${channel.name}:`, e.message));
+            await channel.delete('Limpieza automática por inactividad').catch(()=>{});
         }
     }
 }
 
-// --- 4. CHECK GAME BANS (DESBANEO AUTOMÁTICO HÍBRIDO) ---
+// --- 4. CHECK GAME BANS (DESBANEO AUTOMÁTICO) ---
 async function checkGameBans(guild) {
     const bans = getGameBans(guild.id);
     const now = Date.now();
 
     for (const ban of bans) {
         if (ban.ban_type === 'horas' && ban.unban_time > 0 && now >= ban.unban_time) {
-            console.log(`🔓 [Ark] Tiempo cumplido. Desbaneando a ${ban.ark_id}...`);
-            
-            // CAMBIO: Usamos sendGlobalCommand en lugar de sendRconCommand
             const result = await sendGlobalCommand(guild.id, `UnbanPlayer "${ban.ark_id}"`);
             
-            // Si al menos un servidor procesó el comando (success: true), quitamos el ban
             if (result.success) {
                 removeGameBan(guild.id, ban.ark_id);
-                
                 if (ban.discord_id) {
                     try {
                         const user = await guild.client.users.fetch(ban.discord_id);
-                        await user.send({
-                            embeds: [new EmbedBuilder()
-                                .setTitle('🦖 Baneo de Ark Finalizado')
-                                .setColor('Green')
-                                .setDescription(`Tu sanción temporal en el servidor de Ark de **${guild.name}** ha expirado.\nYa puedes volver a entrar.`)
-                                .setTimestamp()
-                            ]
-                        });
+                        await user.send('🦖 Tu baneo temporal de Ark ha finalizado.');
                     } catch (e) {}
                 }
             }
@@ -260,7 +237,7 @@ async function checkGameBans(guild) {
     }
 }
 
-// --- 5. CHECK PAYMENTS (SISTEMA PREMIUM) ---
+// --- 5. CHECK PAYMENTS ---
 async function checkPayments(client) {
     try {
         const alertChannel = client.channels.cache.find(c => c.name === '🔔・alertas-pagos');
@@ -274,7 +251,7 @@ async function checkPayments(client) {
             
             const days = Math.floor((now - pg.added_at) / 86400000);
             if (days > 0 && days % 30 === 0 && (now - pg.last_alert > 86400000)) {
-                await alertChannel.send(`💰 **COBRO PENDIENTE:** Cliente ${pg.client_name} (ID: ${pg.guild_id}) - Lleva ${days} días activo.`);
+                await alertChannel.send(`💰 **COBRO PENDIENTE:** Cliente ${pg.client_name} - ${days} días.`);
                 updateLastAlert(pg.guild_id);
             }
         }

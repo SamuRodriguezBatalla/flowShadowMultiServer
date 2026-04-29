@@ -2,6 +2,7 @@ require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
 const { Client, GatewayIntentBits, Partials, Collection } = require("discord.js");
+const { startCleanupTask } = require('./utils/cleanupManager');
 
 // Configuración del Cliente
 const client = new Client({
@@ -59,3 +60,9 @@ console.log("🛡️ Sistemas anti-crash activados.");
 
 // 4. Login
 client.login(process.env.BOT_TOKEN);
+client.once('ready', () => {
+    console.log(`Logueado como ${client.user.tag}`);
+    
+    // INICIAR LIMPIEZA
+    startCleanupTask(client);
+});
